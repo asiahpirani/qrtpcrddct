@@ -3,6 +3,8 @@ require(shinyjs)
 require(ggplot2)
 
 title_str = "qRT-PCR \\(\\Delta\\Delta\\text{CT}\\) Analysis"
+load_tab_title = "Load Data"
+plot_tab_title = "Plot"
 
 # Define UI ----
 ui <- fluidPage(
@@ -10,8 +12,9 @@ ui <- fluidPage(
   withMathJax(),
   titlePanel(title_str),
   navbarPage(
-    title_str, id='mainpagetab',
-    tabPanel("Load Data",
+    title_str,
+    id='mainpagetab',
+    tabPanel(load_tab_title,
              sidebarLayout(
                sidebarPanel(width = 5,
                             fluidRow(
@@ -38,7 +41,7 @@ ui <- fluidPage(
                )
              )
     ),
-    tabPanel("Plot", 
+    tabPanel(plot_tab_title, 
              sidebarLayout(
                sidebarPanel(width = 5,
                             fluidRow(
