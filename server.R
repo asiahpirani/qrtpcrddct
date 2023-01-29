@@ -1,6 +1,7 @@
 
 require(shiny)
 require(shinyjs)
+require(shinyFeedback)
 require(ggplot2)
 
 isLoaded = F
@@ -72,10 +73,8 @@ makeDeltaDelta = function(data, cond, ctrl, housekeeping, target, addctrl, addlo
   return(res_agg)
 }
 
-makeOnePlot = function(loadeddata, cond, ctrl, houses, genes, addctrl, addlog, addmin, addgrp)
+makeOnePlot = function(data, cond, ctrl, houses, genes, addctrl, addlog, addmin, addgrp)
 {
-  data = makeDeltaDelta(loadeddata, cond, ctrl, houses, genes, addctrl, addlog, addmin)
-  
   if (addgrp == 1)
   {
     aa = aes(x=conditions, y=mean, fill=target)
@@ -101,6 +100,7 @@ makeOnePlot = function(loadeddata, cond, ctrl, houses, genes, addctrl, addlog, a
 # Define server logic ----
 server <- function(input, output) {
   disable("makeplot")
+  
   observeEvent(eventExpr = input$radio, handlerExpr = {
     if(input$radio == 1) 
     {
@@ -113,98 +113,127 @@ server <- function(input, output) {
       hideElement(id = 'infile')
     }
   })
-  observeEvent(eventExpr = input$loadb, handlerExpr = {
-    if(input$radio == 1) 
+  
+  my_tab = eventReactive(input$loadb, 
+  {
+    if(input$radio == 1) # Upload data
     {
-      output$tabres <- renderTable({
-        file <- input$infile
-        ext <- tools::file_ext(file$datapath)
-        
-        req(file)
-        validate(need(ext == "csv", "Please upload a csv file"))
-        
-        loadeddata <<- read.csv(file$datapath)
-        updateSelectInput(inputId = 'repselect', choices = colnames(loadeddata))
-        updateSelectInput(inputId = 'condselect', choices = colnames(loadeddata))
-        updateSelectInput(inputId = 'houseselect', choices = colnames(loadeddata))
-        updateSelectInput(inputId = 'geneselect', choices = colnames(loadeddata))
-        enable("makeplot")
-        isLoaded <<- T
-        loadeddata
-      })
-    } 
-    else
-    {
-      if (input$textarea == '')
-      {
-        showNotification("Input is empty.", type='error')
-      }
-      else
-      {
-        output$tabres = renderTable({
-          loadeddata <<- read.table(text = input$textarea, sep='\t', header = T)
-          updateSelectInput(inputId = 'repselect', choices = colnames(loadeddata))
-          updateSelectInput(inputId = 'condselect', choices = colnames(loadeddata))
-          updateSelectInput(inputId = 'houseselect', choices = colnames(loadeddata))
-          updateSelectInput(inputId = 'geneselect', choices = colnames(loadeddata))
-          enable("makeplot")
-          isLoaded <<- T
-          loadeddata
-        })
-      }
+      file <- input$infile
+      check = !is.null(file)
+      print(check)
+      feedbackWarning(inputId = 'infile', show=!check, text = "Please select an input file.")
+      # validate(need(check, "Please select an input file."))
+      req(check)
+      ext <- tools::file_ext(file$datapath)
+      validate(need(ext == "csv", "Please upload a csv file"))
+      
+      loadeddata <- read.csv(file$datapath)
     }
+    else # Paste Data
+    {
+      check = input$textarea != ''
+      feedbackWarning('textarea', !check, "Please provide input.")
+      req(check)
+      loadeddata <- read.table(text = input$textarea, sep='\t', header = T)
+    }
+    
+    updateSelectInput(inputId = 'repselect', choices = colnames(loadeddata))
+    updateSelectInput(inputId = 'condselect', choices = colnames(loadeddata))
+    updateSelectInput(inputId = 'houseselect', choices = colnames(loadeddata))
+    updateSelectInput(inputId = 'geneselect', choices = colnames(loadeddata))
+    
+    enable("makeplot")
+    
+    loadeddata
   })
+  
+  output$tabres <- renderTable(my_tab())
   
   observeEvent(eventExpr = input$condselect, handlerExpr = {
     condcol = input$condselect
     if (condcol != "")
     {
-      cid = which(colnames(loadeddata) == condcol)
-      updateSelectInput(inputId = 'ctrlselect', choices = unique(loadeddata[,cid]))
+      cid = which(colnames(my_tab()) == condcol)
+      updateSelectInput(inputId = 'ctrlselect', choices = unique(my_tab()[,cid]))
     }
+  })
+
+  
+  
+  observeEvent(eventExpr = input$processb, handlerExpr = {
+
+    cond_check  = input$condselect != ""
+    ctrl_check  = input$ctrlselect != ""
+    house_check = input$houseselect != ""
+    gene_check  = input$geneselect != ""
+
+    print(cond_check)
+    print(ctrl_check)
+    print(house_check)
+    print(gene_check)
+
+    feedbackWarning(inputId = 'condselect',  show=!cond_check,  text = "Please select the condition column.")
+    feedbackWarning(inputId = 'ctrlselect',  show=!ctrl_check,  text = "Please select the Control label.")
+    feedbackWarning(inputId = 'houseselect', show=!house_check, text = "Please select the house keeping gene(s).")
+    feedbackWarning(inputId = 'geneselect',  show=!gene_check,  text = "Please select the target gene(s).")
+    req(cond_check)
+    req(ctrl_check)
+    req(house_check)
+    req(gene_check)
+
+    data = makeDeltaDelta(my_tab(), input$condselect, input$ctrlselect, input$houseselect, input$geneselect,
+                          input$plotctrl, input$plotlog, input$ploterr)
+    p = makeOnePlot(data, input$condselect, input$ctrlselect, input$houseselect, input$geneselect,
+                    input$plotctrl, input$plotlog, input$ploterr, input$plotgrp)
+    updateNavbarPage(inputId = 'mainpagetab', selected = 'Plot')
+    output$plot = renderPlot(p, res = 96)
+  })
+
+  my_plot = eventReactive(input$processb,
+  {
+    print('im here!')
+    p = makeOnePlot(processed_data(), input$condselect, input$ctrlselect, input$houseselect, input$geneselect,
+                    input$plotctrl, input$plotlog, input$ploterr, input$plotgrp)
+    updateNavbarPage(inputId = 'mainpagetab', selected = 'Plot')
+    p
   })
   
-  observeEvent(eventExpr = input$makeplot, handlerExpr = {
-    if (isLoaded)
-    {
-      p = makeOnePlot(loadeddata, input$condselect, input$ctrlselect, input$houseselect, input$geneselect, 
-                      input$plotctrl, input$plotlog, input$ploterr, input$plotgrp)
-      output$plot = renderPlot({p}, res = 96)
-      # updateTabsetPanel(inputId = "maintabs",selected = "Plot")
-      updateNavbarPage(inputId = 'mainpagetab', selected = 'Plot')
-      isProcessed <<- T
-    }
+  observeEvent(input$makeplotb, handlerExpr = {
+    
+    cond_check  = input$condselect != ""
+    ctrl_check  = input$ctrlselect != ""
+    house_check = input$houseselect != ""
+    gene_check  = input$geneselect != ""
+    
+    print(cond_check)
+    print(ctrl_check)
+    print(house_check)
+    print(gene_check)
+    
+    feedbackWarning(inputId = 'condselect',  show=!cond_check,  text = "Please select the condition column.")
+    feedbackWarning(inputId = 'ctrlselect',  show=!ctrl_check,  text = "Please select the Control label.")
+    feedbackWarning(inputId = 'houseselect', show=!house_check, text = "Please select the house keeping gene(s).")
+    feedbackWarning(inputId = 'geneselect',  show=!gene_check,  text = "Please select the target gene(s).")
+    req(cond_check)
+    req(ctrl_check)
+    req(house_check)
+    req(gene_check)
+    
+    data = makeDeltaDelta(my_tab(), input$condselect, input$ctrlselect, input$houseselect, input$geneselect,
+                          input$plotctrl, input$plotlog, input$ploterr)
+    p = makeOnePlot(data, input$condselect, input$ctrlselect, input$houseselect, input$geneselect,
+                    input$plotctrl, input$plotlog, input$ploterr, input$plotgrp)
+    updateNavbarPage(inputId = 'mainpagetab', selected = 'Plot')
+    output$plot = renderPlot(p, res = 96)
   })
-  observeEvent(eventExpr = input$plotctrl, handlerExpr = {
-    if (isLoaded && isProcessed)
-    {
-      p = makeOnePlot(loadeddata, input$condselect, input$ctrlselect, input$houseselect, input$geneselect,
-                      input$plotctrl, input$plotlog, input$ploterr, input$plotgrp)
-      output$plot = renderPlot({p}, res = 96)
-    }
-  })
-  observeEvent(eventExpr = input$plotlog, handlerExpr = {
-    if (isLoaded && isProcessed)
-    {
-      p = makeOnePlot(loadeddata, input$condselect, input$ctrlselect, input$houseselect, input$geneselect,
-                      input$plotctrl, input$plotlog, input$ploterr, input$plotgrp)
-      output$plot = renderPlot({p}, res = 96)
-    }
-  })
-  observeEvent(eventExpr = input$ploterr, handlerExpr = {
-    if (isLoaded && isProcessed)
-    {
-      p = makeOnePlot(loadeddata, input$condselect, input$ctrlselect, input$houseselect, input$geneselect,
-                      input$plotctrl, input$plotlog, input$ploterr, input$plotgrp)
-      output$plot = renderPlot({p}, res = 96)
-    }
-  })
-  observeEvent(eventExpr = input$plotgrp, handlerExpr = {
-    if (isLoaded && isProcessed)
-    {
-      p = makeOnePlot(loadeddata, input$condselect, input$ctrlselect, input$houseselect, input$geneselect,
-                      input$plotctrl, input$plotlog, input$ploterr, input$plotgrp)
-      output$plot = renderPlot({p}, res = 96)
-    }
-  })
+  
+  # observeEvent(input$makeplotb, 
+  # {
+  #   print('make plot was hit!')
+  #   p = makeOnePlot(processed_data(), input$condselect, input$ctrlselect, input$houseselect, input$geneselect,
+  #                   input$plotctrl, input$plotlog, input$ploterr, input$plotgrp)
+  #   p
+  # })
+  
+  output$plot = renderPlot(my_plot(), res = 96)
 }
