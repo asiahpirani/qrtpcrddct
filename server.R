@@ -176,23 +176,18 @@ server <- function(input, output) {
     
     data = makeDeltaDelta(my_tab(), input$condselect, input$ctrlselect, input$houseselect, input$geneselect,
                           input$plotctrl, input$plotlog, input$ploterr)
+    proc_data = reactive({data})
     p = makeOnePlot(data, input$condselect, input$ctrlselect, input$houseselect, input$geneselect,
                     input$plotctrl, input$plotlog, input$ploterr, input$plotgrp)
     updateNavbarPage(inputId = 'mainpagetab', selected = 'Plot')
     output$plot = renderPlot(p, res = 96)
   }
   
-  # observeEvent(eventExpr = input$processb, handlerExpr = {
-  #   make_one_plot()
-  # })
-  # 
-  # observeEvent(input$makeplotb, handlerExpr = {
-  #   make_one_plot()
-  # })
-  
   observeEvent(ignoreInit = T, c(input$makeplotb, input$processb), handlerExpr = {
     make_one_plot()
   })
+  
+  output$tabres <- renderTable(proc_data())
   
   
   observeEvent(input$houseselect, handlerExpr = {
