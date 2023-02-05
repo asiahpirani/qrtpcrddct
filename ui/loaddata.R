@@ -11,8 +11,9 @@ sidebarLayout(
                                  fileInput("infile", h3("Input File")),
                                  textAreaInput("textarea", h3("Input Data"), "", height = "200px", width = "1000px"),
                                  actionButton('loadb', 'Load'),
-                                 actionButton('processb', 'Process'),
-                                 numericInput('n', 'n', value=3)),
+                                 disabled(actionButton('processb', 'Process', )),
+                                 # numericInput('n', 'n', value=3)
+                                 ),
                           column(5, "", offset = 2, 
                                  selectInput("repselect", "Select replicates\' column", c()),
                                  selectInput("condselect", "Select conditions\' column", c()), 

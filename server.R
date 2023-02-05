@@ -142,7 +142,7 @@ server <- function(input, output) {
     updateSelectInput(inputId = 'houseselect', choices = colnames(loadeddata))
     updateSelectInput(inputId = 'geneselect', choices = colnames(loadeddata))
     
-    enable("makeplot")
+    enable("processb")
     
     loadeddata
   })
@@ -158,57 +158,12 @@ server <- function(input, output) {
     }
   })
 
-  
-  
-  observeEvent(eventExpr = input$processb, handlerExpr = {
-
-    cond_check  = input$condselect != ""
-    ctrl_check  = input$ctrlselect != ""
-    house_check = input$houseselect != ""
-    gene_check  = input$geneselect != ""
-
-    print(cond_check)
-    print(ctrl_check)
-    print(house_check)
-    print(gene_check)
-
-    feedbackWarning(inputId = 'condselect',  show=!cond_check,  text = "Please select the condition column.")
-    feedbackWarning(inputId = 'ctrlselect',  show=!ctrl_check,  text = "Please select the Control label.")
-    feedbackWarning(inputId = 'houseselect', show=!house_check, text = "Please select the house keeping gene(s).")
-    feedbackWarning(inputId = 'geneselect',  show=!gene_check,  text = "Please select the target gene(s).")
-    req(cond_check)
-    req(ctrl_check)
-    req(house_check)
-    req(gene_check)
-
-    data = makeDeltaDelta(my_tab(), input$condselect, input$ctrlselect, input$houseselect, input$geneselect,
-                          input$plotctrl, input$plotlog, input$ploterr)
-    p = makeOnePlot(data, input$condselect, input$ctrlselect, input$houseselect, input$geneselect,
-                    input$plotctrl, input$plotlog, input$ploterr, input$plotgrp)
-    updateNavbarPage(inputId = 'mainpagetab', selected = 'Plot')
-    output$plot = renderPlot(p, res = 96)
-  })
-
-  my_plot = eventReactive(input$processb,
+  make_one_plot = function()
   {
-    print('im here!')
-    p = makeOnePlot(processed_data(), input$condselect, input$ctrlselect, input$houseselect, input$geneselect,
-                    input$plotctrl, input$plotlog, input$ploterr, input$plotgrp)
-    updateNavbarPage(inputId = 'mainpagetab', selected = 'Plot')
-    p
-  })
-  
-  observeEvent(input$makeplotb, handlerExpr = {
-    
     cond_check  = input$condselect != ""
     ctrl_check  = input$ctrlselect != ""
-    house_check = input$houseselect != ""
-    gene_check  = input$geneselect != ""
-    
-    print(cond_check)
-    print(ctrl_check)
-    print(house_check)
-    print(gene_check)
+    house_check = !is.null(input$houseselect)
+    gene_check  = !is.null(input$geneselect)
     
     feedbackWarning(inputId = 'condselect',  show=!cond_check,  text = "Please select the condition column.")
     feedbackWarning(inputId = 'ctrlselect',  show=!ctrl_check,  text = "Please select the Control label.")
@@ -225,15 +180,31 @@ server <- function(input, output) {
                     input$plotctrl, input$plotlog, input$ploterr, input$plotgrp)
     updateNavbarPage(inputId = 'mainpagetab', selected = 'Plot')
     output$plot = renderPlot(p, res = 96)
-  })
+  }
   
-  # observeEvent(input$makeplotb, 
-  # {
-  #   print('make plot was hit!')
-  #   p = makeOnePlot(processed_data(), input$condselect, input$ctrlselect, input$houseselect, input$geneselect,
-  #                   input$plotctrl, input$plotlog, input$ploterr, input$plotgrp)
-  #   p
+  # observeEvent(eventExpr = input$processb, handlerExpr = {
+  #   make_one_plot()
+  # })
+  # 
+  # observeEvent(input$makeplotb, handlerExpr = {
+  #   make_one_plot()
   # })
   
-  output$plot = renderPlot(my_plot(), res = 96)
+  observeEvent(ignoreInit = T, c(input$makeplotb, input$processb), handlerExpr = {
+    make_one_plot()
+  })
+  
+  
+  observeEvent(input$houseselect, handlerExpr = {
+    hideFeedback("houseselect")
+  })
+  observeEvent(input$geneselect, handlerExpr = {
+    hideFeedback("geneselect")
+  })
+  observeEvent(input$infile, handlerExpr = {
+    hideFeedback("infile")
+  })
+  observeEvent(input$textarea, handlerExpr = {
+    hideFeedback("textarea")
+  })
 }
