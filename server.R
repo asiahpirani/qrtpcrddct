@@ -102,12 +102,17 @@ server <- function(input, output) {
   disable("makeplot")
   
   observeEvent(eventExpr = input$radio, handlerExpr = {
-    if(input$radio == 1) 
+    if(input$radio == 0)
+    {
+      hideElement(id = 'infile')
+      hideElement(id = 'textarea')
+    }
+    else if(input$radio == 1) 
     {
       showElement(id = 'infile')
       hideElement(id = 'textarea')
     } 
-    else
+    else if (input$radio == 2)
     {
       showElement(id = 'textarea')
       hideElement(id = 'infile')
@@ -116,7 +121,12 @@ server <- function(input, output) {
   
   my_tab = eventReactive(input$loadb, 
   {
-    if(input$radio == 1) # Upload data
+    if(input$radio == 0) # load default
+    {
+      file <- file.path("example", "data.csv")
+      loadeddata <- read.csv(file)
+    }
+    else if(input$radio == 1) # Upload data
     {
       file <- input$infile
       check = !is.null(file)
@@ -129,7 +139,7 @@ server <- function(input, output) {
       
       loadeddata <- read.csv(file$datapath)
     }
-    else # Paste Data
+    else if(input$radio == 2) # Paste Data
     {
       check = input$textarea != ''
       feedbackWarning('textarea', !check, "Please provide input.")
@@ -158,7 +168,7 @@ server <- function(input, output) {
     }
   })
 
-  make_one_plot = function()
+  processAndPlot = function()
   {
     cond_check  = input$condselect != ""
     ctrl_check  = input$ctrlselect != ""
@@ -176,19 +186,22 @@ server <- function(input, output) {
     
     data = makeDeltaDelta(my_tab(), input$condselect, input$ctrlselect, input$houseselect, input$geneselect,
                           input$plotctrl, input$plotlog, input$ploterr)
-    proc_data = reactive({data})
+    proc_data <<- data
     p = makeOnePlot(data, input$condselect, input$ctrlselect, input$houseselect, input$geneselect,
                     input$plotctrl, input$plotlog, input$ploterr, input$plotgrp)
+    
+    proc_plot <<- p
+    
     updateNavbarPage(inputId = 'mainpagetab', selected = 'Plot')
     output$plot = renderPlot(p, res = 96)
   }
   
-  observeEvent(ignoreInit = T, c(input$makeplotb, input$processb), handlerExpr = {
-    make_one_plot()
+  observeEvent(ignoreInit = T, c(input$processb,
+                                 input$plotctrl, input$plotlog, 
+                                 input$ploterr, input$plotgrp), 
+    handlerExpr = {
+      processAndPlot()
   })
-  
-  output$tabres <- renderTable(proc_data())
-  
   
   observeEvent(input$houseselect, handlerExpr = {
     hideFeedback("houseselect")
@@ -202,4 +215,30 @@ server <- function(input, output) {
   observeEvent(input$textarea, handlerExpr = {
     hideFeedback("textarea")
   })
+  
+  output$download_tab <- downloadHandler(
+    filename = function(){'delta_delta.csv'},
+    content = function(file)
+    {
+      write.csv(proc_data, file)
+    }
+  )
+  
+  output$download_plt <- downloadHandler(
+    filename = function(){paste('delta_delta_bar.', input$pltfrmt, sep='')},
+    content = function(file)
+    {
+      if (input$pltfrmt == 'pdf')
+      {
+        fnc = pdf
+      }
+      else if (input$pltfrmt == 'png')
+      {
+        fnc = function(...){png(..., units='in', res=300)}
+      }
+      fnc(file = file, width = input$width, height = input$height)
+      plot(proc_plot)
+      dev.off()
+    }
+  )
 }
