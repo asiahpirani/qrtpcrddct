@@ -69,7 +69,7 @@ makeDeltaDelta = function(data, cond, ctrl, housekeeping, target, addctrl, addlo
   {
     res_agg = log(res_agg, base = 2)
   }
-  res_agg = cbind(conditions=res_names[,1], target=res_names[,2], res_agg)
+  res_agg = cbind(Conditions=res_names[,1], Target=res_names[,2], res_agg)
   return(res_agg)
 }
 
@@ -77,23 +77,27 @@ makeOnePlot = function(data, cond, ctrl, houses, genes, addctrl, addlog, addmin,
 {
   if (addgrp == 1)
   {
-    aa = aes(x=conditions, y=mean, fill=target)
+    aa = aes(x=Conditions, y=mean, fill=Target)
   }
   else
   {
-    aa = aes(x=target, y=mean, fill=conditions)
+    aa = aes(x=Target, y=mean, fill=Conditions)
   }
   hh = 1
+  yl = expression(paste(Delta, Delta, 'CT'))
   if (addlog == 2)
   {
     hh = 0
+    yl = expression(paste('log ',Delta, Delta, 'CT'))
   }
   p = ggplot(data, aa) +
     geom_bar(stat="identity", position=position_dodge()) +
+    ylab(yl) + xlab('') +
     geom_errorbar(aes(ymin=min, ymax=max), width=.2,
                   position=position_dodge(.9)) +
-    geom_hline(yintercept=hh, linetype="dashed", color = "green") + 
-    theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+    geom_hline(yintercept=hh, linetype="dashed", color = "green")
+    # theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+    # theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
   return(p)
 }
 

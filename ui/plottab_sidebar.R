@@ -1,5 +1,8 @@
 fluidRow(
   column(12, "",
+         h4('Plot settings'),
+  ),
+  column(12, "",
          fluidRow(
            column(6, "",
                   radioButtons("plotctrl", 'Control', 
@@ -21,9 +24,31 @@ fluidRow(
          )
   ),
   column(12, "",
-          fluidRow(
-            downloadButton("download_tab", label = 'Processed data'),
-          )
+         hr(style = "border: 1px solid #aaaaaa;")
+  ),
+  column(12, "",
+    h4('Download Results'),
+  ),
+  column(12, "",
+         fluidRow(
+           column(6, "",
+                  downloadButton("download_tab", label = 'Processed data'),
+                  br(), " ", br()
+           ),
+           column(6, "",
+                  " "
+           ),
+         )
+         # fluidRow(
+         #    downloadButton("download_tab", label = 'Processed data'),
+         #    br(), " ", br()
+         #  )
+  ),
+  column(12, "",
+         hr(style = "border: 1px solid #aaaaaa;")
+  ),
+  column(12, "",
+         h4('Download Figure'),
   ),
   column(12, "",
          fluidRow(
@@ -33,7 +58,7 @@ fluidRow(
            ),
            column(6, "",
             numericInput('height', 'Height', 4, min = 4, width = '50%'),
-            h4('Download'),
+            strong('Download'),br(),
             downloadButton("download_plt", label = 'Plot')
            ),
          )
