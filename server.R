@@ -3,6 +3,7 @@ require(shiny)
 require(shinyjs)
 require(shinyFeedback)
 require(ggplot2)
+require(purrr)
 
 isLoaded = F
 isProcessed = F
@@ -103,7 +104,7 @@ makeOnePlot = function(data, cond, ctrl, houses, genes, addctrl, addlog, addmin,
 
 # Define server logic ----
 server <- function(input, output) {
-  disable("makeplot")
+  # disable("makeplot")
   
   observeEvent(eventExpr = input$radio, handlerExpr = {
     if(input$radio == 0)
@@ -120,6 +121,29 @@ server <- function(input, output) {
     {
       showElement(id = 'textarea')
       hideElement(id = 'infile')
+    }
+  })
+  
+  all_genes = reactive({c(input$houseselect, input$geneselect)})
+  
+  output$rotor_ph = renderUI({fluidRow()})
+  
+  observeEvent(eventExpr = input$effradio, handlerExpr = {
+    if(input$effradio == 0)
+    {
+    }
+    else if(input$effradio == 1) 
+    {
+      output$rotor_ph = renderUI({
+        fluidRow(
+          column(12, "",
+            map(all_genes(), ~ selectInput(.x, .x, choices=colnames(my_tab())))
+          )
+        )
+      })
+    } 
+    else if (input$effradio == 2)
+    {
     }
   })
   
@@ -152,11 +176,21 @@ server <- function(input, output) {
     }
     
     updateSelectInput(inputId = 'repselect', choices = colnames(loadeddata))
+    updateSelectInput(inputId = 'techselect', choices = c('NA',colnames(loadeddata)))
     updateSelectInput(inputId = 'condselect', choices = colnames(loadeddata))
+    updateSelectInput(inputId = 'timeselect', choices = c('NA',colnames(loadeddata)))
     updateSelectInput(inputId = 'houseselect', choices = colnames(loadeddata))
     updateSelectInput(inputId = 'geneselect', choices = colnames(loadeddata))
     
     enable("processb")
+    enable("repselect")
+    enable("techselect")
+    enable("houseselect")
+    enable("geneselect")
+    enable("condselect")
+    enable("timeselect")
+    enable("ctrlselect")
+    enable('effradio')
     
     loadeddata
   })
