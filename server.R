@@ -126,7 +126,7 @@ server <- function(input, output) {
   
   all_genes = reactive({c(input$houseselect, input$geneselect)})
   
-  output$rotor_ph = renderUI({fluidRow()})
+  # output$rotor_ph = renderUI({fluidRow()})
   
   observeEvent(eventExpr = input$effradio, handlerExpr = {
     if(input$effradio == 0)
