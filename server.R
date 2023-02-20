@@ -8,7 +8,8 @@ require(purrr)
 isLoaded = F
 isProcessed = F
 
-makeDeltaDelta = function(data, cond, ctrl, housekeeping, target, addctrl, addlog, addmin, eff = 2)
+makeDeltaDelta = function(data, cond, ctrl, housekeeping, target, addctrl, addlog, addmin, 
+                          effradio=0, genenames = c(), geneeff = c(), eff = 2)
 {
   conditions = data[, cond]
   uconditions = unique(conditions)
@@ -137,7 +138,7 @@ server <- function(input, output) {
       output$rotor_ph = renderUI({
         fluidRow(
           column(12, "",
-            map(all_genes(), ~ selectInput(.x, .x, choices=colnames(my_tab())))
+            map(all_genes(), ~ selectInput(.x, .x, choices=c('', colnames(my_tab()))))
           )
         )
       })
@@ -222,8 +223,22 @@ server <- function(input, output) {
     req(house_check)
     req(gene_check)
     
+    if (input$effradio == 1)
+    {
+      for (g in all_genes())
+      {
+        c_check  = input[[g]] != ""
+        feedbackWarning(inputId = g,  show=!c_check,  text = "Please select the efficiency column.")
+      }
+      for (g in all_genes())
+      {
+        req(c_check)
+      }
+    }
+    
+    
     data = makeDeltaDelta(my_tab(), input$condselect, input$ctrlselect, input$houseselect, input$geneselect,
-                          input$plotctrl, input$plotlog, input$ploterr)
+                          input$plotctrl, input$plotlog, input$ploterr, input$effradio, )
     proc_data <<- data
     p = makeOnePlot(data, input$condselect, input$ctrlselect, input$houseselect, input$geneselect,
                     input$plotctrl, input$plotlog, input$ploterr, input$plotgrp)
