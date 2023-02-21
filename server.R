@@ -4,17 +4,48 @@ require(shinyjs)
 require(shinyFeedback)
 require(ggplot2)
 require(purrr)
+require(dplyr)
+
 
 isLoaded = F
 isProcessed = F
 
-makeDeltaDelta = function(data, cond, ctrl, housekeeping, target, addctrl, addlog, addmin, 
+makeDeltaDelta = function(data, cond_col, times_col, rep_col, tech_col,
+                          ctrl, housekeeping, target,
+                          addctrl, addlog, addmin, 
                           effradio=0, genenames = c(), geneeff = c(), eff = 2)
 {
-  conditions = data[, cond]
+  conditions = data[, cond_col]
   uconditions = unique(conditions)
   uconditions = uconditions[-which(uconditions==ctrl)]
   uconditions = c(ctrl, uconditions)
+  
+  if (times_col != 'NA')
+  {
+    times = data[, times_col]
+    utimes = unique(times)
+  }
+  
+  if (tech_col != 'NA')
+  {
+    if (times_col != 'NA')
+    {
+      group_names = c(cond_col, times_col, rep_col)
+    }
+    else
+    {
+      group_names = c(cond_col, rep_col)
+    }
+    var_names = genenames
+    if (effradio == 1)
+    {
+      var_names = c(var_names, geneeff)
+    }
+    data = data %>% group_by_at(group_names) %>% 
+                    summarise(across(var_names,mean)) %>% 
+                    as.data.frame()
+  }
+  
   hk = data[, housekeeping]
   if (length(housekeeping) > 1)
   {

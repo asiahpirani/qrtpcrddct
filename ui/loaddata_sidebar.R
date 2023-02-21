@@ -32,6 +32,7 @@ fluidRow(
                  disabled(selectInput("techselect", "Technical replicates\' column (optional)", c())),
                  disabled(selectInput('geneselect', 'Target genes', c(), multiple = T)),
                  disabled(selectInput("timeselect", "Time points\' column (optional)", c())), 
+                 disabled(selectInput("timectrlselect", "T0 Time point", c()))
           )
         )
     ),
