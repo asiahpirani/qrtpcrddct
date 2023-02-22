@@ -24,14 +24,14 @@ fluidRow(
         fluidRow(
           column(6, "",
                  disabled(selectInput("repselect", "Biological replicates\' column", c())),
-                 disabled(selectInput('houseselect', 'Housekeeping genes', c(), multiple = T)),
+                 disabled(selectInput('houseselect', 'Reference genes', c(), multiple = T)),
                  disabled(selectInput("condselect", "Conditions\' column", c())), 
                  disabled(selectInput("ctrlselect", "Control condition", c()))
           ),
           column(6, "", # offset = 2, 
-                 disabled(selectInput("techselect", "Technical replicates\' column (optional)", c())),
+                 disabled(selectInput("techselect", "Technical replicates\' column", c())),
                  disabled(selectInput('geneselect', 'Target genes', c(), multiple = T)),
-                 disabled(selectInput("timeselect", "Time points\' column (optional)", c())), 
+                 disabled(selectInput("timeselect", "Time points\' column", c())), 
                  disabled(selectInput("timectrlselect", "T0 Time point", c()))
           )
         )

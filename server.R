@@ -11,10 +11,35 @@ isLoaded = F
 isProcessed = F
 
 makeDeltaDelta = function(data, cond_col, times_col, rep_col, tech_col,
-                          ctrl, housekeeping, target,
+                          ctrl, timecntrl, housekeeping, target,
                           addctrl, addlog, addmin, 
                           effradio=0, genenames = c(), geneeff = c(), eff = 2)
 {
+  
+  if (tech_col != 'NA')
+  {
+    group_names = c(rep_col)
+    if (times_col != 'NA')
+    {
+      group_names = c(times_col, group_names)
+    }
+    if (cond_col != 'NA')
+    {
+      group_names = c(cond_col, group_names)
+    }
+    
+    var_names = genenames
+    if (effradio == 1)
+    {
+      var_names = c(var_names, geneeff)
+    }
+    data = data %>% group_by_at(group_names) %>% 
+      summarise(across(var_names,mean)) %>% 
+      as.data.frame()
+  }
+  
+  print(head(data))
+  
   conditions = data[, cond_col]
   uconditions = unique(conditions)
   uconditions = uconditions[-which(uconditions==ctrl)]
@@ -26,25 +51,7 @@ makeDeltaDelta = function(data, cond_col, times_col, rep_col, tech_col,
     utimes = unique(times)
   }
   
-  if (tech_col != 'NA')
-  {
-    if (times_col != 'NA')
-    {
-      group_names = c(cond_col, times_col, rep_col)
-    }
-    else
-    {
-      group_names = c(cond_col, rep_col)
-    }
-    var_names = genenames
-    if (effradio == 1)
-    {
-      var_names = c(var_names, geneeff)
-    }
-    data = data %>% group_by_at(group_names) %>% 
-                    summarise(across(var_names,mean)) %>% 
-                    as.data.frame()
-  }
+  
   
   hk = data[, housekeeping]
   if (length(housekeeping) > 1)
@@ -209,7 +216,7 @@ server <- function(input, output) {
     
     updateSelectInput(inputId = 'repselect', choices = colnames(loadeddata))
     updateSelectInput(inputId = 'techselect', choices = c('NA',colnames(loadeddata)))
-    updateSelectInput(inputId = 'condselect', choices = colnames(loadeddata))
+    updateSelectInput(inputId = 'condselect', choices = c('NA',colnames(loadeddata)))
     updateSelectInput(inputId = 'timeselect', choices = c('NA',colnames(loadeddata)))
     updateSelectInput(inputId = 'houseselect', choices = colnames(loadeddata))
     updateSelectInput(inputId = 'geneselect', choices = colnames(loadeddata))
@@ -222,6 +229,7 @@ server <- function(input, output) {
     enable("condselect")
     enable("timeselect")
     enable("ctrlselect")
+    enable("timectrlselect")
     enable('effradio')
     
     loadeddata
@@ -237,20 +245,35 @@ server <- function(input, output) {
       updateSelectInput(inputId = 'ctrlselect', choices = unique(my_tab()[,cid]))
     }
   })
+  
+  observeEvent(eventExpr = input$timeselect, handlerExpr = {
+    timecol = input$timeselect
+    if (timecol != "")
+    {
+      cid = which(colnames(my_tab()) == timecol)
+      updateSelectInput(inputId = 'timectrlselect', choices = unique(my_tab()[,cid]))
+    }
+  })
 
   processAndPlot = function()
   {
-    cond_check  = input$condselect != ""
+    cond_check  = input$condselect != "NA"
+    time_check  = input$timeselect != "NA"
     ctrl_check  = input$ctrlselect != ""
+    timectrl_check  = input$timectrlselect != ""
     house_check = !is.null(input$houseselect)
     gene_check  = !is.null(input$geneselect)
     
-    feedbackWarning(inputId = 'condselect',  show=!cond_check,  text = "Please select the condition column.")
-    feedbackWarning(inputId = 'ctrlselect',  show=!ctrl_check,  text = "Please select the Control label.")
+    feedbackWarning(inputId = 'condselect',  show=(!cond_check && !time_check),  text = "Please select the condition or time column.")
+    feedbackWarning(inputId = 'timeselect',  show=(!cond_check && !time_check),  text = "Please select the time or condition column.")
+    feedbackWarning(inputId = 'ctrlselect',  show=(!ctrl_check && cond_check),  text = "Please select the Control label.")
+    feedbackWarning(inputId = 'timectrlselect',  show=(!timectrl_check && time_check),  text = "Please select the T0 label.")
     feedbackWarning(inputId = 'houseselect', show=!house_check, text = "Please select the house keeping gene(s).")
     feedbackWarning(inputId = 'geneselect',  show=!gene_check,  text = "Please select the target gene(s).")
-    req(cond_check)
-    req(ctrl_check)
+    
+    req(cond_check||time_check)
+    req(ctrl_check||!cond_check)
+    req(timectrl_check||!time_check)
     req(house_check)
     req(gene_check)
     
@@ -268,8 +291,19 @@ server <- function(input, output) {
     }
     
     
-    data = makeDeltaDelta(my_tab(), input$condselect, input$ctrlselect, input$houseselect, input$geneselect,
-                          input$plotctrl, input$plotlog, input$ploterr, input$effradio, )
+    data = makeDeltaDelta(my_tab(), input$condselect, input$timeselect, 
+                          input$repselect, input$techselect,
+                          input$ctrlselect, input$timectrlselect,
+                          input$houseselect, input$geneselect,
+                          input$plotctrl, input$plotlog, input$ploterr, 
+                          input$effradio)
+    
+    makeDeltaDelta = function(data, cond_col, times_col, rep_col, tech_col,
+                              ctrl, timecntrl, housekeeping, target,
+                              addctrl, addlog, addmin, 
+                              effradio=0, genenames = c(), geneeff = c(), eff = 2)
+      
+    
     proc_data <<- data
     p = makeOnePlot(data, input$condselect, input$ctrlselect, input$houseselect, input$geneselect,
                     input$plotctrl, input$plotlog, input$ploterr, input$plotgrp)
@@ -293,6 +327,20 @@ server <- function(input, output) {
   observeEvent(input$geneselect, handlerExpr = {
     hideFeedback("geneselect")
   })
+  
+  observeEvent(input$timeselect, handlerExpr = {
+    hideFeedback("timeselect")
+  })
+  observeEvent(input$condselect, handlerExpr = {
+    hideFeedback("condselect")
+  })
+  observeEvent(input$timectrlselect, handlerExpr = {
+    hideFeedback("timectrlselect")
+  })
+  observeEvent(input$ctrlselect, handlerExpr = {
+    hideFeedback("ctrlselect")
+  })
+  
   observeEvent(input$infile, handlerExpr = {
     hideFeedback("infile")
   })
