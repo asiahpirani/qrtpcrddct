@@ -13,7 +13,7 @@ isProcessed = F
 makeDeltaDelta = function(data, cond_col, times_col, rep_col, tech_col,
                           ctrl, timecntrl, housekeeping, target,
                           addctrl, addlog, addmin, 
-                          effradio=0, genenames = c(), geneeff = c(), eff = 2)
+                          eff_matrix)
 {
   
   if (tech_col != 'NA')
@@ -144,6 +144,8 @@ makeOnePlot = function(data, cond, ctrl, houses, genes, addctrl, addlog, addmin,
 # Define server logic ----
 server <- function(input, output) {
   # disable("makeplot")
+  
+  hideTab(inputId = 'mainpagetab', target = 'Plot')
   
   observeEvent(eventExpr = input$radio, handlerExpr = {
     if(input$radio == 0)
@@ -290,18 +292,26 @@ server <- function(input, output) {
       }
     }
     
+    eff = 2
+    eff_matrix = matrix(eff, dim(my_tab())[1], length(all_genes()))
+    colnames(eff_matrix) = all_genes()
+    if (input$effradio == 1)
+    {
+      for (g in all_genes())
+      {
+        eff_matrix[, g] = my_tab()[, input[[g]]]
+      }
+    }
+    if (input$effradio == 2)
+    {
+    }
     
     data = makeDeltaDelta(my_tab(), input$condselect, input$timeselect, 
                           input$repselect, input$techselect,
                           input$ctrlselect, input$timectrlselect,
                           input$houseselect, input$geneselect,
                           input$plotctrl, input$plotlog, input$ploterr, 
-                          input$effradio)
-    
-    makeDeltaDelta = function(data, cond_col, times_col, rep_col, tech_col,
-                              ctrl, timecntrl, housekeeping, target,
-                              addctrl, addlog, addmin, 
-                              effradio=0, genenames = c(), geneeff = c(), eff = 2)
+                          eff_matrix)
       
     
     proc_data <<- data
@@ -310,6 +320,7 @@ server <- function(input, output) {
     
     proc_plot <<- p
     
+    showTab(inputId = 'mainpagetab', target = 'Plot')
     updateNavbarPage(inputId = 'mainpagetab', selected = 'Plot')
     output$plot = renderPlot(p, res = 96)
   }
