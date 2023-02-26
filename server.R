@@ -7,6 +7,8 @@ require(purrr)
 require(dplyr)
 
 
+source(file.path('global_vars.R'),  local = TRUE)
+
 isLoaded = F
 isProcessed = F
 
@@ -145,7 +147,8 @@ makeOnePlot = function(data, cond, ctrl, houses, genes, addctrl, addlog, addmin,
 server <- function(input, output) {
   # disable("makeplot")
   
-  hideTab(inputId = 'mainpagetab', target = 'Plot')
+  hideTab(inputId = 'mainpagetab', target = plot_tab_title)
+  hideTab(inputId = 'mainpagetab', target = dilution_tab_title)
   
   observeEvent(eventExpr = input$radio, handlerExpr = {
     if(input$radio == 0)
@@ -172,9 +175,11 @@ server <- function(input, output) {
   observeEvent(eventExpr = input$effradio, handlerExpr = {
     if(input$effradio == 0)
     {
+      hideTab(inputId = 'mainpagetab', target = dilution_tab_title)
     }
     else if(input$effradio == 1) 
     {
+      hideTab(inputId = 'mainpagetab', target = dilution_tab_title)
       output$rotor_ph = renderUI({
         fluidRow(
           column(12, "",
@@ -185,6 +190,8 @@ server <- function(input, output) {
     } 
     else if (input$effradio == 2)
     {
+      showTab(inputId = 'mainpagetab', target = dilution_tab_title)
+      updateNavbarPage(inputId = 'mainpagetab', selected = dilution_tab_title)
     }
   })
   
@@ -236,6 +243,35 @@ server <- function(input, output) {
     
     loadeddata
   })
+  
+  my_dil_tab = eventReactive(input$dilloadb, 
+  {
+   file <- input$dilinfile
+   check = !is.null(file)
+   feedbackWarning(inputId = 'dilinfile', show=!check, text = "Please select an input file.")
+   # validate(need(check, "Please select an input file."))
+   req(check)
+   ext <- tools::file_ext(file$datapath)
+   validate(need(ext == "csv", "Please upload a csv file"))
+   
+   loadeddata <- read.csv(file$datapath)
+   
+   updateSelectInput(inputId = 'dilrepselect', choices = colnames(loadeddata))
+   updateSelectInput(inputId = 'diltechselect', choices = c('NA',colnames(loadeddata)))
+   updateSelectInput(inputId = 'dilcondselect', choices = c('NA',colnames(loadeddata)))
+   updateSelectInput(inputId = 'diltimeselect', choices = c('NA',colnames(loadeddata)))
+   updateSelectInput(inputId = 'dilgeneselect', choices = colnames(loadeddata))
+   
+   enable("dilprocessb")
+   enable("dilrepselect")
+   enable("diltechselect")
+   enable("dilgeneselect")
+   enable("dilcondselect")
+   enable("diltimeselect")
+   
+   loadeddata
+  })
+  
   
   output$tabres <- renderTable(my_tab())
   
@@ -321,7 +357,7 @@ server <- function(input, output) {
     proc_plot <<- p
     
     showTab(inputId = 'mainpagetab', target = 'Plot')
-    updateNavbarPage(inputId = 'mainpagetab', selected = 'Plot')
+    updateNavbarPage(inputId = 'mainpagetab', selected = plot_tab_title)
     output$plot = renderPlot(p, res = 96)
   }
   

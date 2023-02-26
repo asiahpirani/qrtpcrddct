@@ -3,9 +3,7 @@ require(shinyjs)
 require(shinyFeedback)
 require(ggplot2)
 
-title_str = "qRT-PCR \\(\\Delta\\Delta\\text{CT}\\) Analysis"
-load_tab_title = "Load Data"
-plot_tab_title = "Plot"
+source(file.path('global_vars.R'),  local = TRUE)
 
 # Define UI ----
 ui <- fluidPage(
@@ -18,6 +16,9 @@ ui <- fluidPage(
       conditionalPanel(condition = paste('input.mainpagetab == "', load_tab_title, '"', sep=''), 
         source(file.path("ui", "loaddata_sidebar.R"),  local = TRUE)$value
       ),
+      conditionalPanel(condition = paste('input.mainpagetab == "', dilution_tab_title, '"', sep=''), 
+                       source(file.path("ui", "dilution_sidebar.R"),  local = TRUE)$value
+      ),
       conditionalPanel(condition = paste('input.mainpagetab == "', plot_tab_title, '"', sep=''), 
                        source(file.path("ui", "plottab_sidebar.R"),  local = TRUE)$value
       )
@@ -29,6 +30,9 @@ ui <- fluidPage(
         id='mainpagetab',
         tabPanel(load_tab_title, 
                  source(file.path("ui", "loaddata.R"),  local = TRUE)$value
+        ),
+        tabPanel(dilution_tab_title, 
+                 source(file.path("ui", "dilution.R"),  local = TRUE)$value
         ),
         tabPanel(plot_tab_title, 
                  source(file.path("ui", "plottab.R"),  local = TRUE)$value
