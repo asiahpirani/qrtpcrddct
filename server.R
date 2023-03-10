@@ -244,34 +244,71 @@ server <- function(input, output) {
     loadeddata
   })
   
-  my_dil_tab = eventReactive(input$dilloadb, 
-  {
-   file <- input$dilinfile
-   check = !is.null(file)
-   feedbackWarning(inputId = 'dilinfile', show=!check, text = "Please select an input file.")
-   # validate(need(check, "Please select an input file."))
-   req(check)
-   ext <- tools::file_ext(file$datapath)
-   validate(need(ext == "csv", "Please upload a csv file"))
-   
-   loadeddata <- read.csv(file$datapath)
-   
-   updateSelectInput(inputId = 'dilrepselect', choices = colnames(loadeddata))
-   updateSelectInput(inputId = 'diltechselect', choices = c('NA',colnames(loadeddata)))
-   updateSelectInput(inputId = 'dilcondselect', choices = c('NA',colnames(loadeddata)))
-   updateSelectInput(inputId = 'diltimeselect', choices = c('NA',colnames(loadeddata)))
-   updateSelectInput(inputId = 'dilgeneselect', choices = colnames(loadeddata))
-   
-   enable("dilprocessb")
-   enable("dilrepselect")
-   enable("diltechselect")
-   enable("dilgeneselect")
-   enable("dilcondselect")
-   enable("diltimeselect")
-   
-   loadeddata
+  observeEvent(ignoreInit = T, input$dilloadb, 
+  handlerExpr = {
+    file <- input$dilinfile
+    check = !is.null(file)
+    feedbackWarning(inputId = 'dilinfile', show=!check, text = "Please select an input file.")
+    # validate(need(check, "Please select an input file."))
+    req(check)
+    ext <- tools::file_ext(file$datapath)
+    validate(need(ext == "csv", "Please upload a csv file"))
+    
+    loadeddata <- read.csv(file$datapath)
+    
+    updateSelectInput(inputId = 'dilrepselect', choices = colnames(loadeddata))
+    updateSelectInput(inputId = 'diltechselect', choices = c('NA',colnames(loadeddata)))
+    updateSelectInput(inputId = 'dilcondselect', choices = c('NA',colnames(loadeddata)))
+    updateSelectInput(inputId = 'diltimeselect', choices = c('NA',colnames(loadeddata)))
+    updateSelectInput(inputId = 'dilgeneselect', choices = colnames(loadeddata))
+    updateSelectInput(inputId = 'dilcpselect', choices = colnames(loadeddata))
+    updateSelectInput(inputId = 'dilcdnaselect', choices = colnames(loadeddata))
+    
+    enable("dilprocessb")
+    enable("dilrepselect")
+    enable("diltechselect")
+    enable("dilgeneselect")
+    enable("dilcondselect")
+    enable("diltimeselect")
+    enable("dilcpselect")
+    enable("dilcdnaselect")
+    
+    my_dil_tab <<- loadeddata
+    
+    output$diltabres <- renderTable({loadeddata})
   })
   
+  # processDil = function()
+  # {
+  #   cond_check  = input$condselect != "NA"
+  #   time_check  = input$timeselect != "NA"
+  #   ctrl_check  = input$ctrlselect != ""
+  #   timectrl_check  = input$timectrlselect != ""
+  #   house_check = !is.null(input$houseselect)
+  #   gene_check  = !is.null(input$geneselect)
+  #   
+  #   feedbackWarning(inputId = 'condselect',  show=(!cond_check && !time_check),  text = "Please select the condition or time column.")
+  #   feedbackWarning(inputId = 'timeselect',  show=(!cond_check && !time_check),  text = "Please select the time or condition column.")
+  #   feedbackWarning(inputId = 'ctrlselect',  show=(!ctrl_check && cond_check),  text = "Please select the Control label.")
+  #   feedbackWarning(inputId = 'timectrlselect',  show=(!timectrl_check && time_check),  text = "Please select the T0 label.")
+  #   feedbackWarning(inputId = 'houseselect', show=!house_check, text = "Please select the house keeping gene(s).")
+  #   feedbackWarning(inputId = 'geneselect',  show=!gene_check,  text = "Please select the target gene(s).")
+  #   
+  #   req(cond_check||time_check)
+  #   req(ctrl_check||!cond_check)
+  #   req(timectrl_check||!time_check)
+  #   req(house_check)
+  #   req(gene_check)
+  #   
+  #   # calc_slope = function(x, y){
+  #   #   xx = log10(x)
+  #   #   slope = coefficients(lm(y ~ xx))[2]
+  #   #   return(10^(-1/slope))
+  #   # }
+  #   # my_dil_tab %>% group_by_at(c('Condition', 'Time', 'Rep', 'Gene')) %>% 
+  #   #   summarise(slope=calc_slope(cDNA.Input, Cycle)) %>%
+  #   #   as.data.frame()
+  # }
   
   output$tabres <- renderTable(my_tab())
   
@@ -393,6 +430,10 @@ server <- function(input, output) {
   })
   observeEvent(input$textarea, handlerExpr = {
     hideFeedback("textarea")
+  })
+  
+  observeEvent(input$dilinfile, handlerExpr = {
+    hideFeedback("dilinfile")
   })
   
   output$download_tab <- downloadHandler(
