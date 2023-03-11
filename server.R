@@ -5,6 +5,7 @@ require(shinyFeedback)
 require(ggplot2)
 require(purrr)
 require(dplyr)
+require(tidyr)
 
 
 source(file.path('global_vars.R'),  local = TRUE)
@@ -256,13 +257,13 @@ server <- function(input, output) {
     
     loadeddata <- read.csv(file$datapath)
     
-    updateSelectInput(inputId = 'dilrepselect', choices = colnames(loadeddata))
+    updateSelectInput(inputId = 'dilrepselect', choices = c('NA',colnames(loadeddata)))
     updateSelectInput(inputId = 'diltechselect', choices = c('NA',colnames(loadeddata)))
     updateSelectInput(inputId = 'dilcondselect', choices = c('NA',colnames(loadeddata)))
     updateSelectInput(inputId = 'diltimeselect', choices = c('NA',colnames(loadeddata)))
-    updateSelectInput(inputId = 'dilgeneselect', choices = colnames(loadeddata))
-    updateSelectInput(inputId = 'dilcpselect', choices = colnames(loadeddata))
-    updateSelectInput(inputId = 'dilcdnaselect', choices = colnames(loadeddata))
+    updateSelectInput(inputId = 'dilgeneselect', choices = c('NA',colnames(loadeddata)))
+    updateSelectInput(inputId = 'dilcpselect', choices = c('NA',colnames(loadeddata)))
+    updateSelectInput(inputId = 'dilcdnaselect', choices = c('NA',colnames(loadeddata)))
     
     enable("dilprocessb")
     enable("dilrepselect")
@@ -278,37 +279,63 @@ server <- function(input, output) {
     output$diltabres <- renderTable({loadeddata})
   })
   
-  # processDil = function()
-  # {
-  #   cond_check  = input$condselect != "NA"
-  #   time_check  = input$timeselect != "NA"
-  #   ctrl_check  = input$ctrlselect != ""
-  #   timectrl_check  = input$timectrlselect != ""
-  #   house_check = !is.null(input$houseselect)
-  #   gene_check  = !is.null(input$geneselect)
-  #   
-  #   feedbackWarning(inputId = 'condselect',  show=(!cond_check && !time_check),  text = "Please select the condition or time column.")
-  #   feedbackWarning(inputId = 'timeselect',  show=(!cond_check && !time_check),  text = "Please select the time or condition column.")
-  #   feedbackWarning(inputId = 'ctrlselect',  show=(!ctrl_check && cond_check),  text = "Please select the Control label.")
-  #   feedbackWarning(inputId = 'timectrlselect',  show=(!timectrl_check && time_check),  text = "Please select the T0 label.")
-  #   feedbackWarning(inputId = 'houseselect', show=!house_check, text = "Please select the house keeping gene(s).")
-  #   feedbackWarning(inputId = 'geneselect',  show=!gene_check,  text = "Please select the target gene(s).")
-  #   
-  #   req(cond_check||time_check)
-  #   req(ctrl_check||!cond_check)
-  #   req(timectrl_check||!time_check)
-  #   req(house_check)
-  #   req(gene_check)
-  #   
-  #   # calc_slope = function(x, y){
-  #   #   xx = log10(x)
-  #   #   slope = coefficients(lm(y ~ xx))[2]
-  #   #   return(10^(-1/slope))
-  #   # }
-  #   # my_dil_tab %>% group_by_at(c('Condition', 'Time', 'Rep', 'Gene')) %>% 
-  #   #   summarise(slope=calc_slope(cDNA.Input, Cycle)) %>%
-  #   #   as.data.frame()
-  # }
+  processDil = function()
+  {
+    rep_check  = input$dilrepselect != 'NA'
+    tech_check = input$diltechselect != 'NA'
+    cond_check = input$dilcondselect != 'NA'
+    time_check = input$diltimeselect != 'NA'
+    gene_check = input$dilgeneselect != 'NA'
+    cp_check   = input$dilcpselect != 'NA'
+    cdna_check = input$dilcdnaselect != 'NA'
+    
+
+    feedbackWarning(inputId = 'dilcondselect',  show=(!cond_check && !time_check), text = "Please select the condition or time column.")
+    feedbackWarning(inputId = 'diltimeselect',  show=(!cond_check && !time_check), text = "Please select the time or condition column.")
+    feedbackWarning(inputId = 'dilgeneselect',  show=!gene_check,                  text = "Please select the genes\' column.")
+    feedbackWarning(inputId = 'dilrepselect',   show=(!rep_check && !tech_check),  text = "Please select the biological or technical replicates\' column.")
+    feedbackWarning(inputId = 'diltechselect',  show=(!rep_check && !tech_check),  text = "Please select the biological or technical replicates\' column.")
+    feedbackWarning(inputId = 'dilcpselect',    show=!cp_check,                    text = "Please select the Cycles\' column.")
+    feedbackWarning(inputId = 'dilcdnaselect',  show=!cdna_check,                  text = "Please select the Concentrations\' column.")
+
+    req(cond_check||time_check)
+    req(gene_check)
+    req(rep_check||tech_check)
+    req(cp_check)
+    req(cdna_check)
+
+    all_checks = c(cond_check, time_check, gene_check, rep_check, tech_check)
+    all_vals   = c(input$dilcondselect, input$diltimeselect,
+                   input$dilgeneselect,
+                   input$dilrepselect, input$diltechselect)
+    col_list = c()
+    for (i in 1:length(all_checks))
+    {
+      if (all_checks[i])
+      {
+        col_list = c(col_list, all_vals[i])
+      }
+    }
+    
+    calc_slope = function(x, y){
+      xx = unlist(log10(x))
+      yy = unlist(y)
+      slope = coefficients(lm(yy ~ xx))[2]
+      return(10^(-1/slope))
+    }
+    dil_sum <- my_dil_tab %>% group_by_at(col_list) %>%
+      summarise(eff=calc_slope(cur_data()[, input$dilcdnaselect], cur_data()[, input$dilcpselect])) %>%
+      as.data.frame()
+    print(dil_sum)
+    dil_sum_wide <<- dil_sum %>% spread(input$dilgeneselect, 'eff')
+    print(dil_sum_wide)
+    print('end')
+  }
+  
+  observeEvent(ignoreInit = T, input$dilprocessb, 
+               handlerExpr = {
+                 processDil()
+               })
   
   output$tabres <- renderTable(my_tab())
   
