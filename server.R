@@ -15,10 +15,18 @@ isProcessed = F
 
 makeDeltaDelta = function(data, cond_col, times_col, rep_col, tech_col,
                           ctrl, timecntrl, housekeeping, target,
-                          addctrl, addlog, addmin, 
                           eff_matrix)
 {
-  
+  print('here 1')
+  all_genes = c(housekeeping, target)
+  for (g in all_genes)
+  {
+    data[, g] = eff_matrix[, g]^data[, g]
+  }
+  g_mean = function(vec)
+  {
+    exp(mean(log(vec)))
+  }
   if (tech_col != 'NA')
   {
     group_names = c(rep_col)
@@ -31,101 +39,220 @@ makeDeltaDelta = function(data, cond_col, times_col, rep_col, tech_col,
       group_names = c(cond_col, group_names)
     }
     
-    var_names = genenames
-    if (effradio == 1)
-    {
-      var_names = c(var_names, geneeff)
-    }
+    var_names = all_genes
     data = data %>% group_by_at(group_names) %>% 
-      summarise(across(var_names,mean)) %>% 
+      summarise(across(var_names,g_mean)) %>% 
       as.data.frame()
   }
   
   print(head(data))
   
-  conditions = data[, cond_col]
-  uconditions = unique(conditions)
-  uconditions = uconditions[-which(uconditions==ctrl)]
-  uconditions = c(ctrl, uconditions)
-  
-  if (times_col != 'NA')
+  get_unique = function(conditions, ctrl)
   {
-    times = data[, times_col]
-    utimes = unique(times)
+    uconditions = unique(conditions)
+    uconditions = uconditions[-which(uconditions==ctrl)]
+    uconditions = c(ctrl, uconditions)
+    uconditions
   }
   
+  if (cond_col != 'NA')
+  {
+    conditions = data[, cond_col]
+    uconditions = get_unique(conditions, ctrl)
+  }
+  if (times_col != 'NA')
+  {
+    times  = data[, times_col]
+    utimes = get_unique(times, timecntrl)
+  }
   
+  print('here 2')
   
   hk = data[, housekeeping]
   if (length(housekeeping) > 1)
   {
-    hk = apply(hk, 1, mean)
+    hk = apply(hk, 1, g_mean)
   }
   tg = as.data.frame(data[, target])
   colnames(tg) = target
-  delta = tg - hk
+  delta = tg / hk
+  
+  print('here 2.1')
   
   res = c()
   for (tg in target)
   {
+    print(paste('here 2.2', tg))
     dd = delta[, tg]
-    ctrlmean = mean(dd[conditions == ctrl])
-    deltadelta = dd - ctrlmean
+    if (cond_col != 'NA')
+    {
+      ids1 = conditions == ctrl
+      ids  = ids1
+    }
+    print(paste('here 2.3', tg))
+    if (times_col != 'NA')
+    {
+      ids2 = times == timecntrl
+      ids  = ids2
+    }
+    print(paste('here 2.4', tg))
+    if (times_col != 'NA' && cond_col != 'NA')
+    {
+      ids = ids1 & ids2
+    }
+    print(paste('here 2.5', tg))
+    ctrlmean = g_mean(dd[ids])
+    deltadelta = dd / ctrlmean
     res = cbind(res, deltadelta)
   }
   colnames(res) = target
   
+  print('here 3')
+  
   # conditions = conditions[conditions != ctrl]
   # deltadelta = deltadelta[conditions != ctrl]
-  res = eff^-res
-  res_agg = c()
-  res_names = c()
-  for (cnd in uconditions)
+  # res = eff^-res
+  res = 1/res
+  
+  get_agg = function(vec)
   {
-    for (tg in target)
+    res_mean = mean(vec)
+    res_min  = min(vec)
+    res_max  = max(vec)
+    ss = sd(vec)
+    res_sdn  = res_mean-ss
+    res_sdp  = res_mean+ss
+    agg = c(res_mean, res_min, res_max, res_sdn, res_sdp)
+    names(agg) = c('mean', 'min', 'max', '-sd', '+sd')
+    return(agg)
+  }
+  
+  run_all_agg_1 = function(res, conditions, uconditions, targets)
+  {
+    res_agg = c()
+    res_names = c()
+    for (cnd in uconditions)
     {
-      res_mean = mean(res[conditions == cnd, tg])
-      res_min  = min(res[conditions == cnd, tg])
-      res_max  = max(res[conditions == cnd, tg])
-      if (addmin == 2)
+      for (tg in target)
       {
-        ss = sd(res[conditions == cnd, tg])
-        res_min = res_mean-ss
-        res_max = res_mean+ss
-      }
-      if (cnd == ctrl)
-      {
-        res_mean = 1
-        res_min = 1
-        res_max = 1
-      }
-      if (addctrl != 2 || cnd != ctrl)
-      {
-        res_agg  = rbind(res_agg, c(res_mean, res_min, res_max))
+        vec  = res[conditions == cnd, tg]
+        lvec = log2(vec)
+        agg  = get_agg(vec)
+        lagg = get_agg(lvec)
+        names(lagg) = paste('log.', names(lagg), sep='')
+        
+        res_agg   = rbind(res_agg, c(agg, lagg))
         res_names = rbind(res_names, c(cnd, tg))
       }
     }
+    res_agg = as.data.frame(res_agg)
+    res_agg = cbind(Conditions=res_names[,1], Target=res_names[,2], res_agg)
+    return(res_agg)
   }
-  res_agg = as.data.frame(res_agg)
-  colnames(res_agg) = c('mean', 'min', 'max')
-  if (addlog == 2)
+  
+  run_all_agg_2 = function(res, conditions, uconditions, times, utimes, targets)
   {
-    res_agg = log(res_agg, base = 2)
+    res_agg = c()
+    res_names = c()
+    for (cnd in uconditions)
+    {
+      for (tm in utimes)
+      {
+        for (tg in target)
+        {
+          vec  = res[conditions == cnd & times == tm, tg]
+          lvec = log2(vec)
+          agg  = get_agg(vec)
+          lagg = get_agg(lvec)
+          names(lagg) = paste('log.', names(lagg), sep='')
+          
+          res_agg   = rbind(res_agg, c(agg, lagg))
+          res_names = rbind(res_names, c(cnd, tm, tg))
+        }
+      }
+    }
+    res_agg = as.data.frame(res_agg)
+    res_agg = cbind(Conditions=res_names[,1], Times=res_names[,2], Target=res_names[,3], res_agg)
+    return(res_agg)
   }
-  res_agg = cbind(Conditions=res_names[,1], Target=res_names[,2], res_agg)
+  
+  print('here 4')
+  
+  if(times_col != 'NA' && cond_col != 'NA')
+  {
+    res_agg = run_all_agg_2(res, conditions, uconditions, times, utimes, targets)
+  }
+  if(times_col == 'NA' && cond_col != 'NA')
+  {
+    res_agg = run_all_agg_1(res, conditions, uconditions, targets)
+  }
+  if(times_col != 'NA' && cond_col == 'NA')
+  {
+    res_agg = run_all_agg_1(res, times, utimes, targets)
+    colnames(res_agg)[1] = 'Times'
+  }
+  
+  print('here 5')
+  
   return(res_agg)
 }
 
-makeOnePlot = function(data, cond, ctrl, houses, genes, addctrl, addlog, addmin, addgrp)
+makeOnePlot = function(data, cond_select, time_select, ctrl, timectrl, houses, genes, addctrl, addlog, addmin, addgrp, plotori)
 {
-  if (addgrp == 1)
+  
+  if (addctrl == 2)
   {
-    aa = aes(x=Conditions, y=mean, fill=Target)
+    if (! is.null(ctrl) && ! is.null(timectrl))
+    {
+      data = data %>% filter(Conditions != ctrl | Times != timectrl)
+    }
+    else
+    {
+      if (! is.null(ctrl) )
+      {
+        data = data %>% filter(Conditions != ctrl)
+      }
+      if (! is.null(timectrl))
+      {
+        data = data %>% filter(Times != timectrl)
+      }
+    }
+  }
+  
+  # ggplot(proc_data, aes(x = Times, y = log.mean)) + 
+  #   geom_bar(stat="identity", position=position_dodge()) + 
+  #   facet_wrap(~Conditions+Target)
+  if (addlog == 2)
+  {
+    yy = 'log.mean'
   }
   else
   {
-    aa = aes(x=Target, y=mean, fill=Conditions)
+    yy = 'mean'
   }
+  
+  # list("Genes" = 1, 
+  #      "Conditions" = 2,
+  #      "Times" = 3,
+  #      "Conditions & Genes (color by Genes)" = 4,
+  #      "Conditions & Genes (color by Conditions)" = 5,
+  #      "Times & Genes (color by Genes)" = 6,
+  #      "Times & Genes (color by Times)" = 7,
+  #      "Conditions & Times (color by Times)" = 8,
+  #      "Conditions & Times (color by Conditions)" = 9)
+  
+  aa = switch(addgrp, 
+              '1'=aes(x=Target, y=!!sym(yy), fill=Target),         # "Genes" = 1, 
+              '2'=aes(x=Conditions, y=!!sym(yy), fill=Conditions), # "Conditions" = 2,
+              '3'=aes(x=Times, y=!!sym(yy), fill=Times),           # "Times" = 3,
+              '4'=aes(x=Conditions, y=!!sym(yy), fill=Target),     # "Conditions & Genes (color by Genes)" = 4,
+              '5'=aes(x=Target, y=!!sym(yy), fill=Conditions),     # "Conditions & Genes (color by Conditions)" = 5,
+              '6'=aes(x=Times, y=!!sym(yy), fill=Target),          # "Times & Genes (color by Genes)" = 6,
+              '7'=aes(x=Target, y=!!sym(yy), fill=Times),          # "Times & Genes (color by Times)" = 7,
+              '8'=aes(x=Conditions, y=!!sym(yy), fill=Times),      # "Conditions & Times (color by Times)" = 8,
+              '9'=aes(x=Times, y=!!sym(yy), fill=Conditions)       # "Conditions & Times (color by Conditions)" = 9)
+              )
+  
   hh = 1
   yl = expression(paste(Delta, Delta, 'CT'))
   if (addlog == 2)
@@ -133,10 +260,84 @@ makeOnePlot = function(data, cond, ctrl, houses, genes, addctrl, addlog, addmin,
     hh = 0
     yl = expression(paste('log ',Delta, Delta, 'CT'))
   }
+  if (addmin == 1)
+  {
+    m1 = 'min'
+    m2 = 'max'
+  }
+  else
+  {
+    m1 = '-sd'
+    m2 = '+sd'
+  }
+  if (addlog == 2)
+  {
+    m1 = paste('log.', m1, sep='')
+    m2 = paste('log.', m2, sep='')
+  }
   p = ggplot(data, aa) +
-    geom_bar(stat="identity", position=position_dodge()) +
+    geom_bar(stat="identity", position=position_dodge())
+  
+  
+  cond_time_cnt = 0
+  if (cond_select != 'NA')
+  {
+    cond_time_cnt = cond_time_cnt + 1
+  }
+  if (time_select != 'NA')
+  {
+    cond_time_cnt = cond_time_cnt + 2
+  }
+  
+  if (cond_time_cnt == 3)
+  {
+    
+    # c('Conditions x Times'=1, 'Times x Conditions'=2)
+    # c('Target x Times'=3, 'Times x Target'=4)
+    # c('Conditions x Target'=5, 'Target x Conditions'=6)
+    gg = switch(plotori,
+                '1'=facet_grid(vars(Conditions), vars(Times)),
+                '2'=facet_grid(vars(Times), vars(Conditions)),
+                '3'=facet_grid(vars(Target), vars(Times)),
+                '4'=facet_grid(vars(Times), vars(Target)),
+                '5'=facet_grid(vars(Conditions), vars(Target)),
+                '6'=facet_grid(vars(Target), vars(Conditions))
+    )
+  }
+  
+  p = switch(paste(addgrp, cond_time_cnt),
+             "1 1" = p+facet_wrap(~Conditions), # "Genes" = 1, 
+             "1 2" = p+facet_wrap(~Times),      # "Genes" = 1, 
+             "1 3" = p+gg,                      # "Genes" = 1, 
+             "2 1" = p+facet_wrap(~Target),     # "Conditions" = 2,
+             "2 2" = p,                         # "Conditions" = 2, # shouldn't happen
+             "2 3" = p+gg,                      # "Conditions" = 2,
+             "3 1" = p,                         # "Times" = 3,      # shouldn't happen
+             "3 2" = p+facet_wrap(~Target),     # "Times" = 3,
+             "3 3" = p+gg,                      # "Times" = 3,
+             "4 1" = p,                         # "Conditions & Genes (color by Genes)" = 4,
+             "4 2" = p,                         # "Conditions & Genes (color by Genes)" = 4, # shouldn't happen
+             "4 3" = p+facet_wrap(~Times),      # "Conditions & Genes (color by Genes)" = 4,
+             "5 1" = p,                         # "Conditions & Genes (color by Conditions)" = 5,
+             "5 2" = p,                         # "Conditions & Genes (color by Conditions)" = 5, # shouldn't happen
+             "5 3" = p+facet_wrap(~Times),      # "Conditions & Genes (color by Conditions)" = 5,
+             "6 1" = p,                         # "Times & Genes (color by Genes)" = 6, # shouldn't happen
+             "6 2" = p,                         # "Times & Genes (color by Genes)" = 6,
+             "6 3" = p+facet_wrap(~Conditions), # "Times & Genes (color by Genes)" = 6,
+             "7 1" = p,                         # "Times & Genes (color by Times)" = 7, # shouldn't happen
+             "7 2" = p,                         # "Times & Genes (color by Times)" = 7,
+             "7 3" = p+facet_wrap(~Conditions), # "Times & Genes (color by Times)" = 7,
+             "8 1" = p,                         # "Conditions & Times (color by Times)" = 8, # shouldn't happen
+             "8 2" = p,                         # "Conditions & Times (color by Times)" = 8, # shouldn't happen
+             "8 3" = p+facet_wrap(~Target),     # "Conditions & Times (color by Times)" = 8,
+             "9 1" = p,                         # "Conditions & Times (color by Conditions)" = 9) # shouldn't happen
+             "9 2" = p,                         # "Conditions & Times (color by Conditions)" = 9) # shouldn't happen
+             "9 3" = p+facet_wrap(~Target),     # "Conditions & Times (color by Conditions)" = 9)
+             )
+
+  p = p +
     ylab(yl) + xlab('') +
-    geom_errorbar(aes(ymin=min, ymax=max), width=.2,
+    geom_errorbar(aes(ymin=!!sym(m1), ymax=!!sym(m2)), width=.2,
                   position=position_dodge(.9)) +
     geom_hline(yintercept=hh, linetype="dashed", color = "green")
     # theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
@@ -150,6 +351,7 @@ server <- function(input, output) {
   
   hideTab(inputId = 'mainpagetab', target = plot_tab_title)
   hideTab(inputId = 'mainpagetab', target = dilution_tab_title)
+  hideElement(id = 'plotori')
   
   observeEvent(eventExpr = input$radio, handlerExpr = {
     if(input$radio == 0)
@@ -281,41 +483,43 @@ server <- function(input, output) {
   
   processDil = function()
   {
-    rep_check  = input$dilrepselect != 'NA'
-    tech_check = input$diltechselect != 'NA'
-    cond_check = input$dilcondselect != 'NA'
-    time_check = input$diltimeselect != 'NA'
+    # rep_check  = input$dilrepselect != 'NA'
+    # tech_check = input$diltechselect != 'NA'
+    # cond_check = input$dilcondselect != 'NA'
+    # time_check = input$diltimeselect != 'NA'
     gene_check = input$dilgeneselect != 'NA'
     cp_check   = input$dilcpselect != 'NA'
     cdna_check = input$dilcdnaselect != 'NA'
     
 
-    feedbackWarning(inputId = 'dilcondselect',  show=(!cond_check && !time_check), text = "Please select the condition or time column.")
-    feedbackWarning(inputId = 'diltimeselect',  show=(!cond_check && !time_check), text = "Please select the time or condition column.")
-    feedbackWarning(inputId = 'dilgeneselect',  show=!gene_check,                  text = "Please select the genes\' column.")
-    feedbackWarning(inputId = 'dilrepselect',   show=(!rep_check && !tech_check),  text = "Please select the biological or technical replicates\' column.")
-    feedbackWarning(inputId = 'diltechselect',  show=(!rep_check && !tech_check),  text = "Please select the biological or technical replicates\' column.")
-    feedbackWarning(inputId = 'dilcpselect',    show=!cp_check,                    text = "Please select the Cycles\' column.")
-    feedbackWarning(inputId = 'dilcdnaselect',  show=!cdna_check,                  text = "Please select the Concentrations\' column.")
+    # feedbackWarning(inputId = 'dilcondselect',  show=(!cond_check && !time_check), text = "Please select the condition or time column.")
+    # feedbackWarning(inputId = 'diltimeselect',  show=(!cond_check && !time_check), text = "Please select the time or condition column.")
+    # feedbackWarning(inputId = 'dilrepselect',   show=(!rep_check && !tech_check),  text = "Please select the biological or technical replicates\' column.")
+    # feedbackWarning(inputId = 'diltechselect',  show=(!rep_check && !tech_check),  text = "Please select the biological or technical replicates\' column.")
+    feedbackWarning(inputId = 'dilgeneselect',  show=!gene_check, text = "Please select the genes\' column.")
+    feedbackWarning(inputId = 'dilcpselect',    show=!cp_check,   text = "Please select the Cycles\' column.")
+    feedbackWarning(inputId = 'dilcdnaselect',  show=!cdna_check, text = "Please select the Concentrations\' column.")
 
-    req(cond_check||time_check)
+    # req(cond_check||time_check)
+    # req(rep_check||tech_check)
     req(gene_check)
-    req(rep_check||tech_check)
     req(cp_check)
     req(cdna_check)
 
-    all_checks = c(cond_check, time_check, gene_check, rep_check, tech_check)
-    all_vals   = c(input$dilcondselect, input$diltimeselect,
-                   input$dilgeneselect,
-                   input$dilrepselect, input$diltechselect)
-    col_list = c()
-    for (i in 1:length(all_checks))
-    {
-      if (all_checks[i])
-      {
-        col_list = c(col_list, all_vals[i])
-      }
-    }
+    col_list = c(input$dilgeneselect)
+    
+    # all_checks = c(cond_check, time_check, gene_check, rep_check, tech_check)
+    # all_vals   = c(input$dilcondselect, input$diltimeselect,
+    #                input$dilgeneselect,
+    #                input$dilrepselect, input$diltechselect)
+    # col_list = c()
+    # for (i in 1:length(all_checks))
+    # {
+    #   if (all_checks[i])
+    #   {
+    #     col_list = c(col_list, all_vals[i])
+    #   }
+    # }
     
     calc_slope = function(x, y){
       xx = unlist(log10(x))
@@ -323,13 +527,42 @@ server <- function(input, output) {
       slope = coefficients(lm(yy ~ xx))[2]
       return(10^(-1/slope))
     }
-    dil_sum <- my_dil_tab %>% group_by_at(col_list) %>%
+    dil_sum <<- my_dil_tab %>% group_by_at(col_list) %>%
       summarise(eff=calc_slope(cur_data()[, input$dilcdnaselect], cur_data()[, input$dilcpselect])) %>%
       as.data.frame()
-    print(dil_sum)
-    dil_sum_wide <<- dil_sum %>% spread(input$dilgeneselect, 'eff')
-    print(dil_sum_wide)
-    print('end')
+    
+    # print(dil_sum)
+    
+    leg = c()
+    for (i in 1:nrow(dil_sum))
+    {
+      g  = dil_sum[i, 1]
+      e  = dil_sum[i, 2]
+      s  = -1/log10(e)
+      ss = paste(g, ', slope=', round(s, digits = 2), ', eff=', round(e, digits = 2), sep='')
+      leg = c(leg, ss)
+    }
+    
+    p <- ggplot(my_dil_tab, aes(x=cDNA.Input, y=Cycle, col=Gene)) + 
+      geom_point() + 
+      scale_x_continuous(trans='log10') + 
+      geom_smooth(method = "lm", se=F, formula = y ~ x) + 
+      xlab('cDNA Input') + ylab('Cycles') +
+      theme(legend.position = c(0.8, 0.8)) +
+      scale_color_discrete(labels=leg)
+    
+    proc_dilplot <<- p
+    output$dilplot = renderPlot(p, res = 96)
+    # print(dil_sum)
+    # dil_sum_wide <<- dil_sum %>% spread(input$dilgeneselect, 'eff')
+    # print(dil_sum_wide)
+    # print('end')
+    
+    enable("dilwidth")
+    enable("dilheight")
+    enable("dilpltfrmt")
+    enable("download_dilplt")
+    
   }
   
   observeEvent(ignoreInit = T, input$dilprocessb, 
@@ -388,6 +621,23 @@ server <- function(input, output) {
       }
       for (g in all_genes())
       {
+        c_check  = input[[g]] != ""
+        req(c_check)
+      }
+    }
+    if (input$effradio == 2)
+    {
+      for (g in all_genes())
+      {
+        c_check = sum(dil_sum[, 1] == g) == 1
+        if (!c_check)
+        {
+          showNotification(paste('Dilution method efficiency is not provided for ', g, sep=''), type='error')
+        }
+      }
+      for (g in all_genes())
+      {
+        c_check = sum(dil_sum[, 1] == g) == 1
         req(c_check)
       }
     }
@@ -404,19 +654,60 @@ server <- function(input, output) {
     }
     if (input$effradio == 2)
     {
+      for (g in all_genes())
+      {
+        eff_matrix[, g] = dil_sum[dil_sum[, 1]==g, 'eff']
+      }
     }
     
     data = makeDeltaDelta(my_tab(), input$condselect, input$timeselect, 
                           input$repselect, input$techselect,
                           input$ctrlselect, input$timectrlselect,
                           input$houseselect, input$geneselect,
-                          input$plotctrl, input$plotlog, input$ploterr, 
                           eff_matrix)
-      
+    
+    
+    # list("Genes" = 1, 
+    #      "Conditions" = 2,
+    #      "Times" = 3,
+    #      "Conditions & Genes (color by Genes)" = 4,
+    #      "Conditions & Genes (color by Conditions)" = 5,
+    #      "Times & Genes (color by Genes)" = 6,
+    #      "Times & Genes (color by Times)" = 7,
+    #      "Conditions & Times (color by Times)" = 8,
+    #      "Conditions & Times (color by Conditions)" = 9)
+    plotgrp = list("Genes" = 1)
+    if (input$condselect != "NA")
+    {
+      plotgrp = append(plotgrp, list("Conditions" = 2))
+    }
+    if (input$timeselect != "NA")
+    {
+      plotgrp = append(plotgrp, list("Times" = 3))
+    }
+    if (input$condselect != "NA")
+    {
+      plotgrp = append(plotgrp, list("Conditions & Genes (color by Genes)" = 4))
+      plotgrp = append(plotgrp, list("Conditions & Genes (color by Conditions)" = 5))
+    }
+    if (input$timeselect != "NA")
+    {
+      plotgrp = append(plotgrp, list("Times & Genes (color by Genes)" = 6))
+      plotgrp = append(plotgrp, list("Times & Genes (color by Times)" = 7))
+    }
+    if (input$condselect != "NA" && input$timeselect != "NA")
+    {
+      plotgrp = append(plotgrp, list("Conditions & Times (color by Times)" = 8))
+      plotgrp = append(plotgrp, list("Conditions & Times (color by Conditions)" = 9))
+    }
+    updateSelectInput(inputId = 'plotgrp', choices = plotgrp)
+    
     
     proc_data <<- data
-    p = makeOnePlot(data, input$condselect, input$ctrlselect, input$houseselect, input$geneselect,
-                    input$plotctrl, input$plotlog, input$ploterr, input$plotgrp)
+    p = makeOnePlot(data, input$condselect, input$timeselect, input$ctrlselect, input$timectrlselect, 
+                    input$houseselect, input$geneselect,
+                    input$plotctrl, input$plotlog, input$ploterr, input$plotgrp, input$plotori)
+    
     
     proc_plot <<- p
     
@@ -425,11 +716,43 @@ server <- function(input, output) {
     output$plot = renderPlot(p, res = 96)
   }
   
-  observeEvent(ignoreInit = T, c(input$processb,
-                                 input$plotctrl, input$plotlog, 
-                                 input$ploterr, input$plotgrp), 
+  observeEvent(ignoreInit = T, input$processb, 
     handlerExpr = {
       processAndPlot()
+  })
+  
+  observeEvent(ignoreInit = T, c(input$plotctrl, input$plotlog, 
+                                 input$ploterr, input$plotgrp, 
+                                 input$plotori), 
+    handlerExpr = {
+      p = makeOnePlot(proc_data, 
+                      input$condselect, input$timeselect, 
+                      input$ctrlselect, input$timectrlselect, 
+                      input$houseselect, input$geneselect,
+                      input$plotctrl, input$plotlog, input$ploterr, input$plotgrp, input$plotori)
+      proc_plot <<- p
+      output$plot = renderPlot(p, res = 96)
+  })
+  
+  observeEvent(input$plotgrp, 
+  handlerExpr = {
+    if (input$condselect != 'NA' && input$timeselect != 'NA' && input$plotgrp %in% c(1, 2, 3))
+    {
+      choices = switch(input$plotgrp, 
+                       '1'=c('Conditions x Times'=1, 'Times x Conditions'=2),
+                       '2'=c('Target x Times'=3, 'Times x Target'=4),
+                       '3'=c('Conditions x Target'=5, 'Target x Conditions'=6)
+                       )
+      updateRadioButtons(inputId = 'plotori', 
+                         choices = choices)
+      showElement(id = 'plotori')
+    }
+    else
+    {
+      updateRadioButtons(inputId = 'plotori', 
+                         choices = list('NULL'=0))
+      hideElement(id = 'plotori')
+    }
   })
   
   observeEvent(input$houseselect, handlerExpr = {
@@ -462,6 +785,15 @@ server <- function(input, output) {
   observeEvent(input$dilinfile, handlerExpr = {
     hideFeedback("dilinfile")
   })
+  observeEvent(input$dilgeneselect, handlerExpr = {
+    hideFeedback("dilgeneselect")
+  })
+  observeEvent(input$dilcpselect, handlerExpr = {
+    hideFeedback("dilcpselect")
+  })
+  observeEvent(input$dilcdnaselect, handlerExpr = {
+    hideFeedback("dilcdnaselect")
+  })
   
   output$download_tab <- downloadHandler(
     filename = function(){'delta_delta.csv'},
@@ -485,6 +817,24 @@ server <- function(input, output) {
       }
       fnc(file = file, width = input$width, height = input$height)
       plot(proc_plot)
+      dev.off()
+    }
+  )
+  
+  output$download_dilplt <- downloadHandler(
+    filename = function(){paste('dilution_lines.', input$dilpltfrmt, sep='')},
+    content = function(file)
+    {
+      if (input$dilpltfrmt == 'pdf')
+      {
+        fnc = pdf
+      }
+      else if (input$dilpltfrmt == 'png')
+      {
+        fnc = function(...){png(..., units='in', res=300)}
+      }
+      fnc(file = file, width = input$dilwidth, height = input$dilheight)
+      plot(proc_dilplot)
       dev.off()
     }
   )

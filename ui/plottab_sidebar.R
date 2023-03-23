@@ -6,8 +6,8 @@ fluidRow(
          fluidRow(
            column(6, "",
                   radioButtons("plotctrl", 'Control', 
-                               choices = list("Show Control" = 1, "Don't Show Control" = 2), 
-                               selected = 1),
+                               choices = list("Don't Show Control" = 2, "Show Control" = 1), 
+                               selected = 2),
                   radioButtons("plotlog", 'log scale',
                                choices = list("original" = 1, "log" = 2), 
                                selected = 1)
@@ -16,9 +16,18 @@ fluidRow(
                   radioButtons("ploterr", 'Error bars',
                                choices = list("min-max" = 1, "STD" = 2), 
                                selected = 1),
-                  radioButtons("plotgrp", 'Group by', 
-                               choices = list("Condition" = 1, "Cell type" = 2), 
-                               selected = 1)
+                  selectInput("plotgrp", 'In each panel', 
+                               c("Genes" = 1, 
+                                 "Conditions" = 2,
+                                 "Times" = 3,
+                                 "Conditions & Genes (color by Genes)" = 4,
+                                 "Conditions & Genes (color by Conditions)" = 5,
+                                 "Times & Genes (color by Genes)" = 6,
+                                 "Times & Genes (color by Times)" = 7,
+                                 "Conditions & Times (color by Times)" = 8,
+                                 "Conditions & Times (color by Conditions)" = 9)
+                              ),
+                  radioButtons("plotori", 'Plot orientation', choices = list('NULL'=0)),
            ),
            # actionButton('makeplotb', 'Make Plot')
          )
