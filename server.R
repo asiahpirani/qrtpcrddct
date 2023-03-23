@@ -219,9 +219,6 @@ makeOnePlot = function(data, cond_select, time_select, ctrl, timectrl, houses, g
     }
   }
   
-  # ggplot(proc_data, aes(x = Times, y = log.mean)) + 
-  #   geom_bar(stat="identity", position=position_dodge()) + 
-  #   facet_wrap(~Conditions+Target)
   if (addlog == 2)
   {
     yy = 'log.mean'
@@ -702,6 +699,7 @@ server <- function(input, output) {
     }
     updateSelectInput(inputId = 'plotgrp', choices = plotgrp)
     
+    update_ori()
     
     proc_data <<- data
     p = makeOnePlot(data, input$condselect, input$timeselect, input$ctrlselect, input$timectrlselect, 
@@ -722,9 +720,10 @@ server <- function(input, output) {
   })
   
   observeEvent(ignoreInit = T, c(input$plotctrl, input$plotlog, 
-                                 input$ploterr, input$plotgrp, 
+                                 input$ploterr, input$plotgrp,
                                  input$plotori), 
     handlerExpr = {
+      print('shouldnt be here!')
       p = makeOnePlot(proc_data, 
                       input$condselect, input$timeselect, 
                       input$ctrlselect, input$timectrlselect, 
@@ -734,15 +733,15 @@ server <- function(input, output) {
       output$plot = renderPlot(p, res = 96)
   })
   
-  observeEvent(input$plotgrp, 
-  handlerExpr = {
+  update_ori = function()
+  {
     if (input$condselect != 'NA' && input$timeselect != 'NA' && input$plotgrp %in% c(1, 2, 3))
     {
       choices = switch(input$plotgrp, 
                        '1'=c('Conditions x Times'=1, 'Times x Conditions'=2),
                        '2'=c('Target x Times'=3, 'Times x Target'=4),
                        '3'=c('Conditions x Target'=5, 'Target x Conditions'=6)
-                       )
+      )
       updateRadioButtons(inputId = 'plotori', 
                          choices = choices)
       showElement(id = 'plotori')
@@ -753,6 +752,11 @@ server <- function(input, output) {
                          choices = list('NULL'=0))
       hideElement(id = 'plotori')
     }
+  }
+  
+  observeEvent(ignoreInit = T, input$plotgrp, 
+  handlerExpr = {
+    update_ori()
   })
   
   observeEvent(input$houseselect, handlerExpr = {
