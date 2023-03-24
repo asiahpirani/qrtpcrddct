@@ -17,7 +17,6 @@ makeDeltaDelta = function(data, cond_col, times_col, rep_col, tech_col,
                           ctrl, timecntrl, housekeeping, target,
                           eff_matrix)
 {
-  print('here 1')
   all_genes = c(housekeeping, target)
   for (g in all_genes)
   {
@@ -45,7 +44,8 @@ makeDeltaDelta = function(data, cond_col, times_col, rep_col, tech_col,
       as.data.frame()
   }
   
-  print(head(data))
+  reps = data[, rep_col]
+  ureps = unique(reps)
   
   get_unique = function(conditions, ctrl)
   {
@@ -66,8 +66,6 @@ makeDeltaDelta = function(data, cond_col, times_col, rep_col, tech_col,
     utimes = get_unique(times, timecntrl)
   }
   
-  print('here 2')
-  
   hk = data[, housekeeping]
   if (length(housekeeping) > 1)
   {
@@ -77,37 +75,29 @@ makeDeltaDelta = function(data, cond_col, times_col, rep_col, tech_col,
   colnames(tg) = target
   delta = tg / hk
   
-  print('here 2.1')
-  
   res = c()
   for (tg in target)
   {
-    print(paste('here 2.2', tg))
     dd = delta[, tg]
     if (cond_col != 'NA')
     {
       ids1 = conditions == ctrl
       ids  = ids1
     }
-    print(paste('here 2.3', tg))
     if (times_col != 'NA')
     {
       ids2 = times == timecntrl
       ids  = ids2
     }
-    print(paste('here 2.4', tg))
     if (times_col != 'NA' && cond_col != 'NA')
     {
       ids = ids1 & ids2
     }
-    print(paste('here 2.5', tg))
     ctrlmean = g_mean(dd[ids])
     deltadelta = dd / ctrlmean
     res = cbind(res, deltadelta)
   }
   colnames(res) = target
-  
-  print('here 3')
   
   # conditions = conditions[conditions != ctrl]
   # deltadelta = deltadelta[conditions != ctrl]
@@ -127,7 +117,7 @@ makeDeltaDelta = function(data, cond_col, times_col, rep_col, tech_col,
     return(agg)
   }
   
-  run_all_agg_1 = function(res, conditions, uconditions, targets)
+  run_all_agg_1 = function(res, conditions, uconditions, targets, reps, ureps)
   {
     res_agg = c()
     res_names = c()
@@ -141,7 +131,12 @@ makeDeltaDelta = function(data, cond_col, times_col, rep_col, tech_col,
         lagg = get_agg(lvec)
         names(lagg) = paste('log.', names(lagg), sep='')
         
-        res_agg   = rbind(res_agg, c(agg, lagg))
+        temp = rep(NA, length(ureps))
+        names(temp) = ureps
+        creps = reps[conditions == cnd]
+        temp[creps] = vec
+        
+        res_agg   = rbind(res_agg, c(temp, agg, lagg))
         res_names = rbind(res_names, c(cnd, tg))
       }
     }
@@ -150,7 +145,7 @@ makeDeltaDelta = function(data, cond_col, times_col, rep_col, tech_col,
     return(res_agg)
   }
   
-  run_all_agg_2 = function(res, conditions, uconditions, times, utimes, targets)
+  run_all_agg_2 = function(res, conditions, uconditions, times, utimes, targets, reps, ureps)
   {
     res_agg = c()
     res_names = c()
@@ -166,7 +161,12 @@ makeDeltaDelta = function(data, cond_col, times_col, rep_col, tech_col,
           lagg = get_agg(lvec)
           names(lagg) = paste('log.', names(lagg), sep='')
           
-          res_agg   = rbind(res_agg, c(agg, lagg))
+          temp = rep(NA, length(ureps))
+          names(temp) = ureps
+          creps = reps[conditions == cnd & times == tm]
+          temp[creps] = vec
+          
+          res_agg   = rbind(res_agg, c(temp, agg, lagg))
           res_names = rbind(res_names, c(cnd, tm, tg))
         }
       }
@@ -176,23 +176,19 @@ makeDeltaDelta = function(data, cond_col, times_col, rep_col, tech_col,
     return(res_agg)
   }
   
-  print('here 4')
-  
   if(times_col != 'NA' && cond_col != 'NA')
   {
-    res_agg = run_all_agg_2(res, conditions, uconditions, times, utimes, targets)
+    res_agg = run_all_agg_2(res, conditions, uconditions, times, utimes, targets, reps, ureps)
   }
   if(times_col == 'NA' && cond_col != 'NA')
   {
-    res_agg = run_all_agg_1(res, conditions, uconditions, targets)
+    res_agg = run_all_agg_1(res, conditions, uconditions, targets, reps, ureps)
   }
   if(times_col != 'NA' && cond_col == 'NA')
   {
-    res_agg = run_all_agg_1(res, times, utimes, targets)
+    res_agg = run_all_agg_1(res, times, utimes, targets, reps, ureps)
     colnames(res_agg)[1] = 'Times'
   }
-  
-  print('here 5')
   
   return(res_agg)
 }
@@ -202,17 +198,17 @@ makeOnePlot = function(data, cond_select, time_select, ctrl, timectrl, houses, g
   
   if (addctrl == 2)
   {
-    if (ctrl!="" && timectrl!="")
+    if (cond_select!="NA" && time_select!="NA")
     {
       data = data %>% filter(Conditions != ctrl | Times != timectrl)
     }
     else
     {
-      if (ctrl != "" )
+      if (cond_select!="NA")
       {
         data = data %>% filter(Conditions != ctrl)
       }
-      if (timectrl != "")
+      if (time_select!="NA")
       {
         data = data %>% filter(Times != timectrl)
       }
@@ -343,7 +339,7 @@ makeOnePlot = function(data, cond_select, time_select, ctrl, timectrl, houses, g
 }
 
 # Define server logic ----
-server <- function(input, output) {
+server <- function(input, output, session) {
   # disable("makeplot")
   
   hideTab(inputId = 'mainpagetab', target = plot_tab_title)
@@ -423,12 +419,19 @@ server <- function(input, output) {
       loadeddata <- read.table(text = input$textarea, sep='\t', header = T)
     }
     
-    updateSelectInput(inputId = 'repselect', choices = colnames(loadeddata))
-    updateSelectInput(inputId = 'techselect', choices = c('NA',colnames(loadeddata)))
-    updateSelectInput(inputId = 'condselect', choices = c('NA',colnames(loadeddata)))
-    updateSelectInput(inputId = 'timeselect', choices = c('NA',colnames(loadeddata)))
+    updateSelectInput(inputId = 'repselect',   choices = colnames(loadeddata))
+    updateSelectInput(inputId = 'techselect',  choices = c('NA',colnames(loadeddata)))
+    updateSelectInput(inputId = 'condselect',  choices = c('NA',colnames(loadeddata)))
+    updateSelectInput(inputId = 'timeselect',  choices = c('NA',colnames(loadeddata)))
     updateSelectInput(inputId = 'houseselect', choices = colnames(loadeddata))
-    updateSelectInput(inputId = 'geneselect', choices = colnames(loadeddata))
+    updateSelectInput(inputId = 'geneselect',  choices = colnames(loadeddata))
+    
+    updateSelectInput(inputId = 'ctrlselect',     choices = c(""), selected="")
+    updateSelectInput(inputId = 'timectrlselect', choices = c(""), selected="")
+    
+    print('check update')
+    print(input$ctrlselect)
+    print(input$timectrlselect)
     
     enable("processb")
     enable("repselect")
@@ -723,7 +726,6 @@ server <- function(input, output) {
                                  input$ploterr, input$plotgrp,
                                  input$plotori), 
     handlerExpr = {
-      print('shouldnt be here!')
       p = makeOnePlot(proc_data, 
                       input$condselect, input$timeselect, 
                       input$ctrlselect, input$timectrlselect, 
