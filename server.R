@@ -202,17 +202,17 @@ makeOnePlot = function(data, cond_select, time_select, ctrl, timectrl, houses, g
   
   if (addctrl == 2)
   {
-    if (! is.null(ctrl) && ! is.null(timectrl))
+    if (ctrl!="" && timectrl!="")
     {
       data = data %>% filter(Conditions != ctrl | Times != timectrl)
     }
     else
     {
-      if (! is.null(ctrl) )
+      if (ctrl != "" )
       {
         data = data %>% filter(Conditions != ctrl)
       }
-      if (! is.null(timectrl))
+      if (timectrl != "")
       {
         data = data %>% filter(Times != timectrl)
       }
