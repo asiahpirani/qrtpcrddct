@@ -13,10 +13,12 @@ source(file.path('global_vars.R'),  local = TRUE)
 isLoaded = F
 isProcessed = F
 
-makeDeltaDelta = function(data, cond_col, times_col, rep_col, tech_col,
+makeDeltaDelta = function(data, cond_col, uconditions, times_col, utimes, rep_col, tech_col,
                           ctrl, timecntrl, housekeeping, target,
                           eff_matrix)
 {
+  print(uconditions)
+  print(utimes)
   all_genes = c(housekeeping, target)
   for (g in all_genes)
   {
@@ -25,6 +27,11 @@ makeDeltaDelta = function(data, cond_col, times_col, rep_col, tech_col,
   g_mean = function(vec)
   {
     exp(mean(log(vec)))
+  }
+  g_sd = function(vec)
+  {
+    m = g_mean(vec)
+    exp(sqrt(sum(log(vec/m)^2)/length(vec)))
   }
   if (tech_col != 'NA')
   {
@@ -47,9 +54,9 @@ makeDeltaDelta = function(data, cond_col, times_col, rep_col, tech_col,
   reps = data[, rep_col]
   ureps = unique(reps)
   
-  get_unique = function(conditions, ctrl)
+  get_unique = function(uconditions, ctrl)
   {
-    uconditions = unique(conditions)
+    # uconditions = unique(conditions)
     uconditions = uconditions[-which(uconditions==ctrl)]
     uconditions = c(ctrl, uconditions)
     uconditions
@@ -58,12 +65,12 @@ makeDeltaDelta = function(data, cond_col, times_col, rep_col, tech_col,
   if (cond_col != 'NA')
   {
     conditions = data[, cond_col]
-    uconditions = get_unique(conditions, ctrl)
+    uconditions = get_unique(uconditions, ctrl)
   }
   if (times_col != 'NA')
   {
     times  = data[, times_col]
-    utimes = get_unique(times, timecntrl)
+    utimes = get_unique(utimes, timecntrl)
   }
   
   hk = data[, housekeeping]
@@ -104,16 +111,37 @@ makeDeltaDelta = function(data, cond_col, times_col, rep_col, tech_col,
   # res = eff^-res
   res = 1/res
   
-  get_agg = function(vec)
+  get_agg = function(vec, islog)
   {
-    res_mean = mean(vec)
+    if(islog)
+    {
+      res_mean = mean(vec)
+    }
+    else
+    {
+      res_mean = g_mean(vec)
+    }
     res_min  = min(vec)
     res_max  = max(vec)
-    ss = sd(vec)
+    if(islog)
+    {
+      ss = sd(vec)
+    }
+    else
+    {
+      ss = g_sd(vec)
+    }
     res_sdn  = res_mean-ss
     res_sdp  = res_mean+ss
     agg = c(res_mean, res_min, res_max, res_sdn, res_sdp)
-    names(agg) = c('mean', 'min', 'max', '-sd', '+sd')
+    if(islog)
+    {
+      names(agg) = c('log.mean', 'log.min', 'log.max', 'log.-sd', 'log.+sd')
+    }
+    else
+    {
+      names(agg) = c('mean', 'min', 'max', '-sd', '+sd')
+    }
     return(agg)
   }
   
@@ -127,9 +155,9 @@ makeDeltaDelta = function(data, cond_col, times_col, rep_col, tech_col,
       {
         vec  = res[conditions == cnd, tg]
         lvec = log2(vec)
-        agg  = get_agg(vec)
-        lagg = get_agg(lvec)
-        names(lagg) = paste('log.', names(lagg), sep='')
+        agg  = get_agg(vec, F)
+        lagg = get_agg(lvec, T)
+        # names(lagg) = paste('log.', names(lagg), sep='')
         
         temp = rep(NA, length(ureps))
         names(temp) = ureps
@@ -157,9 +185,9 @@ makeDeltaDelta = function(data, cond_col, times_col, rep_col, tech_col,
         {
           vec  = res[conditions == cnd & times == tm, tg]
           lvec = log2(vec)
-          agg  = get_agg(vec)
-          lagg = get_agg(lvec)
-          names(lagg) = paste('log.', names(lagg), sep='')
+          agg  = get_agg(vec, F)
+          lagg = get_agg(lvec, T)
+          # names(lagg) = paste('log.', names(lagg), sep='')
           
           temp = rep(NA, length(ureps))
           names(temp) = ureps
@@ -439,7 +467,9 @@ server <- function(input, output, session) {
     enable("houseselect")
     enable("geneselect")
     enable("condselect")
+    enable("condincselect")
     enable("timeselect")
+    enable("timeincselect")
     enable("ctrlselect")
     enable("timectrlselect")
     enable('effradio')
@@ -577,6 +607,7 @@ server <- function(input, output, session) {
     if (condcol != "")
     {
       cid = which(colnames(my_tab()) == condcol)
+      updateSelectizeInput(inputId = 'condincselect', choices = unique(my_tab()[,cid]), selected = unique(my_tab()[,cid]))
       updateSelectInput(inputId = 'ctrlselect', choices = unique(my_tab()[,cid]))
     }
   })
@@ -586,6 +617,7 @@ server <- function(input, output, session) {
     if (timecol != "")
     {
       cid = which(colnames(my_tab()) == timecol)
+      updateSelectizeInput(inputId = 'timeincselect', choices = unique(my_tab()[,cid]), selected = unique(my_tab()[,cid]))
       updateSelectInput(inputId = 'timectrlselect', choices = unique(my_tab()[,cid]))
     }
   })
@@ -660,7 +692,7 @@ server <- function(input, output, session) {
       }
     }
     
-    data = makeDeltaDelta(my_tab(), input$condselect, input$timeselect, 
+    data = makeDeltaDelta(my_tab(), input$condselect, input$condincselect, input$timeselect, input$timeincselect,
                           input$repselect, input$techselect,
                           input$ctrlselect, input$timectrlselect,
                           input$houseselect, input$geneselect,
@@ -771,8 +803,24 @@ server <- function(input, output, session) {
   observeEvent(input$timeselect, handlerExpr = {
     hideFeedback("timeselect")
   })
+  observeEvent(input$timeincselect, ignoreNULL = FALSE, ignoreInit = T, handlerExpr = {
+    if(is.null(input$timeincselect))
+    {
+      updateSelectizeInput(inputId = 'timeincselect', selected = input$timectrlselect)
+      showNotification("Selection could not be empty.", type = 'error')
+    }
+    updateSelectInput(inputId = 'timectrlselect', choices = input$timeincselect)
+  })
   observeEvent(input$condselect, handlerExpr = {
     hideFeedback("condselect")
+  })
+  observeEvent(input$condincselect, ignoreNULL = FALSE, ignoreInit = T, handlerExpr = {
+    if(is.null(input$condincselect))
+    {
+      updateSelectizeInput(inputId = 'condincselect', selected = input$ctrlselect)
+      showNotification("Selection could not be empty.", type = 'error')
+    }
+    updateSelectInput(inputId = 'ctrlselect', choices = input$condincselect)
   })
   observeEvent(input$timectrlselect, handlerExpr = {
     hideFeedback("timectrlselect")
