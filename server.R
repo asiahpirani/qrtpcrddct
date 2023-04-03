@@ -113,23 +113,39 @@ makeDeltaDelta = function(data, cond_col, uconditions, times_col, utimes, rep_co
   
   get_agg = function(vec, islog)
   {
+    # if(islog)
+    # {
+    #   res_mean = mean(vec)
+    # }
+    # else
+    # {
+    #   res_mean = g_mean(vec)
+    # }
+    # res_min  = min(vec)
+    # res_max  = max(vec)
+    # if(islog)
+    # {
+    #   ss = sd(vec)
+    # }
+    # else
+    # {
+    #   ss = g_sd(vec)
+    # }
+    
+    res_mean = g_mean(vec)
     if(islog)
     {
-      res_mean = mean(vec)
+      res_mean = log2(res_mean)
     }
-    else
-    {
-      res_mean = g_mean(vec)
-    }
+    
     res_min  = min(vec)
     res_max  = max(vec)
+    ss = g_sd(vec)
     if(islog)
     {
-      ss = sd(vec)
-    }
-    else
-    {
-      ss = g_sd(vec)
+      res_min = log2(res_min)
+      res_max = log2(res_max)
+      ss = log2(ss)
     }
     res_sdn  = res_mean-ss
     res_sdp  = res_mean+ss
@@ -156,7 +172,8 @@ makeDeltaDelta = function(data, cond_col, uconditions, times_col, utimes, rep_co
         vec  = res[conditions == cnd, tg]
         lvec = log2(vec)
         agg  = get_agg(vec, F)
-        lagg = get_agg(lvec, T)
+        # lagg = get_agg(lvec, T)
+        lagg = get_agg(vec, T)
         # names(lagg) = paste('log.', names(lagg), sep='')
         
         temp = rep(NA, length(ureps))
@@ -186,7 +203,8 @@ makeDeltaDelta = function(data, cond_col, uconditions, times_col, utimes, rep_co
           vec  = res[conditions == cnd & times == tm, tg]
           lvec = log2(vec)
           agg  = get_agg(vec, F)
-          lagg = get_agg(lvec, T)
+          # lagg = get_agg(lvec, T)
+          lagg = get_agg(vec, T)
           # names(lagg) = paste('log.', names(lagg), sep='')
           
           temp = rep(NA, length(ureps))
