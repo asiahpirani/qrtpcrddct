@@ -390,6 +390,7 @@ server <- function(input, output, session) {
   
   hideTab(inputId = 'mainpagetab', target = plot_tab_title)
   hideTab(inputId = 'mainpagetab', target = dilution_tab_title)
+  hideTab(inputId = 'mainpagetab', target = heatmap_tab_title)
   hideElement(id = 'plotori')
   
   observeEvent(eventExpr = input$radio, handlerExpr = {
@@ -762,7 +763,10 @@ server <- function(input, output, session) {
     
     proc_plot <<- p
     
-    showTab(inputId = 'mainpagetab', target = 'Plot')
+    
+    
+    showTab(inputId = 'mainpagetab', target = plot_tab_title)
+    showTab(inputId = 'mainpagetab', target = heatmap_tab_title)
     updateNavbarPage(inputId = 'mainpagetab', selected = plot_tab_title)
     output$plot = renderPlot(p, res = 96)
   }

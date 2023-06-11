@@ -21,6 +21,9 @@ ui <- fluidPage(
       ),
       conditionalPanel(condition = paste('input.mainpagetab == "', plot_tab_title, '"', sep=''), 
                        source(file.path("ui", "plottab_sidebar.R"),  local = TRUE)$value
+      ),
+      conditionalPanel(condition = paste('input.mainpagetab == "', heatmap_tab_title, '"', sep=''), 
+                       source(file.path("ui", "heattab_sidebar.R"),  local = TRUE)$value
       )
     ),
     mainPanel(
@@ -36,7 +39,9 @@ ui <- fluidPage(
         ),
         tabPanel(plot_tab_title, 
                  source(file.path("ui", "plottab.R"),  local = TRUE)$value
-        )
+        ),
+        tabPanel(heatmap_tab_title,
+                 source(file.path("ui", "heattab.R"),  local = TRUE)$value)
       )
     )
   )
