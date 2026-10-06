@@ -1,13 +1,3 @@
-
-<<<<<<< Updated upstream
-require(shiny)
-require(shinyjs)
-require(shinyFeedback)
-require(ggplot2)
-require(purrr)
-require(dplyr)
-require(tidyr)
-=======
 library(shiny)
 library(shinyjs)
 library(shinyFeedback)
@@ -15,7 +5,6 @@ library(ggplot2)
 library(purrr)
 library(dplyr)
 library(tidyr)
->>>>>>> Stashed changes
 library(ComplexHeatmap)
 
 source(file.path('global_vars.R'),  local = TRUE)
@@ -39,10 +28,33 @@ makeDeltaDelta = function(data, cond_col, uconditions, times_col, utimes, rep_co
   {
     exp(mean(log(vec)))
   }
-  g_sd = function(vec)
+  g_sd <- function(vec)
   {
-    m = g_mean(vec)
-    exp(sqrt(sum(log(vec/m)^2)/length(vec)))
+    vec <- as.numeric(vec)
+    
+    if (length(vec) < 2)
+    {
+      return(NA_real_)
+    }
+    
+    if (any(!is.finite(vec)))
+    {
+      stop("Cannot calculate geometric SD: values contain NA, NaN, or Inf.")
+    }
+    
+    if (any(vec <= 0))
+    {
+      stop("Cannot calculate geometric SD: all values must be greater than zero.")
+    }
+    
+    m <- g_mean(vec)
+    
+    exp(
+      sqrt(
+        sum(log(vec / m)^2) /
+          (length(vec) - 1)
+      )
+    )
   }
   if (tech_col != 'NA')
   {
@@ -122,53 +134,95 @@ makeDeltaDelta = function(data, cond_col, uconditions, times_col, utimes, rep_co
   # res = eff^-res
   res = 1/res
   
-  get_agg = function(vec, islog)
+  get_agg <- function(vec, islog)
   {
-    # if(islog)
-    # {
-    #   res_mean = mean(vec)
-    # }
-    # else
-    # {
-    #   res_mean = g_mean(vec)
-    # }
-    # res_min  = min(vec)
-    # res_max  = max(vec)
-    # if(islog)
-    # {
-    #   ss = sd(vec)
-    # }
-    # else
-    # {
-    #   ss = g_sd(vec)
-    # }
+    vec <- as.numeric(vec)
     
-    res_mean = g_mean(vec)
-    if(islog)
+    if (length(vec) == 0)
     {
-      res_mean = log2(res_mean)
+      stop("Cannot summarize an empty vector.")
     }
     
-    res_min  = min(vec)
-    res_max  = max(vec)
-    ss = g_sd(vec)
-    if(islog)
+    if (any(!is.finite(vec)))
     {
-      res_min = log2(res_min)
-      res_max = log2(res_max)
-      ss = log2(ss)
+      stop("Cannot summarize values containing NA, NaN, or Inf.")
     }
-    res_sdn  = res_mean-ss
-    res_sdp  = res_mean+ss
-    agg = c(res_mean, res_min, res_max, res_sdn, res_sdp)
-    if(islog)
+    
+    if (any(vec <= 0))
     {
-      names(agg) = c('log.mean', 'log.min', 'log.max', 'log.-sd', 'log.+sd')
+      stop("Fold-change values must be greater than zero.")
+    }
+    
+    res_mean <- g_mean(vec)
+    res_min  <- min(vec)
+    res_max  <- max(vec)
+    ss       <- g_sd(vec)
+    
+    if (islog)
+    {
+      res_mean <- log2(res_mean)
+      res_min  <- log2(res_min)
+      res_max  <- log2(res_max)
+      
+      if (is.na(ss))
+      {
+        res_sdn <- NA_real_
+        res_sdp <- NA_real_
+      }
+      else
+      {
+        log_sd <- log2(ss)
+        
+        res_sdn <- res_mean - log_sd
+        res_sdp <- res_mean + log_sd
+      }
+      
+      agg <- c(
+        res_mean,
+        res_min,
+        res_max,
+        res_sdn,
+        res_sdp
+      )
+      
+      names(agg) <- c(
+        "log.mean",
+        "log.min",
+        "log.max",
+        "log.-sd",
+        "log.+sd"
+      )
     }
     else
     {
-      names(agg) = c('mean', 'min', 'max', '-sd', '+sd')
+      if (is.na(ss))
+      {
+        res_sdn <- NA_real_
+        res_sdp <- NA_real_
+      }
+      else
+      {
+        res_sdn <- res_mean / ss
+        res_sdp <- res_mean * ss
+      }
+      
+      agg <- c(
+        res_mean,
+        res_min,
+        res_max,
+        res_sdn,
+        res_sdp
+      )
+      
+      names(agg) <- c(
+        "mean",
+        "min",
+        "max",
+        "-sd",
+        "+sd"
+      )
     }
+    
     return(agg)
   }
   
