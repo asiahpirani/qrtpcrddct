@@ -6,7 +6,7 @@ require(ggplot2)
 require(purrr)
 require(dplyr)
 require(tidyr)
-
+library(ComplexHeatmap)
 
 source(file.path('global_vars.R'),  local = TRUE)
 
@@ -237,6 +237,45 @@ makeDeltaDelta = function(data, cond_col, uconditions, times_col, utimes, rep_co
   }
   
   return(res_agg)
+}
+
+makeOneHeatmap = function(data, 
+                          cond_select, time_select, ctrl, timectrl, 
+                          addctrl, heatlog, heatgrp, heatori)
+{
+  if (addctrl == 2)
+  {
+    if (cond_select!="NA" && time_select!="NA")
+    {
+      data = data %>% filter(Conditions != ctrl | Times != timectrl)
+    }
+    else
+    {
+      if (cond_select!="NA")
+      {
+        data = data %>% filter(Conditions != ctrl)
+      }
+      if (time_select!="NA")
+      {
+        data = data %>% filter(Times != timectrl)
+      }
+    }
+  }
+  
+  genes = unique(data$Target)
+  if (heatlog == 2)
+  {
+    val_var = 'log.mean'
+  }
+  else
+  {
+    val_var = 'mean'
+  }
+  data_mat = spread(data[, c('Target', val_var, 'Times', 'Conditions')], 
+                    key='Target', value=val_var)
+  annot = rowAnnotation(Conditions=data_mat$Conditions, Times=data_mat$Times)
+  h = Heatmap(as.matrix(data_mat[, genes]), right_annotation=annot)
+  return(h)
 }
 
 makeOnePlot = function(data, cond_select, time_select, ctrl, timectrl, houses, genes, addctrl, addlog, addmin, addgrp, plotori)
@@ -763,6 +802,11 @@ server <- function(input, output, session) {
     
     proc_plot <<- p
     
+    h = makeOneHeatmap(data, 
+                       input$condselect, input$timeselect, input$ctrlselect, input$timectrlselect,
+                       input$heatctrl, input$heatlog, input$heatgrp, input$heatori)
+    proc_heat <<- h
+    output$heatmap = renderPlot(h, res = 96)
     
     
     showTab(inputId = 'mainpagetab', target = plot_tab_title)
@@ -788,6 +832,16 @@ server <- function(input, output, session) {
       proc_plot <<- p
       output$plot = renderPlot(p, res = 96)
   })
+  
+  observeEvent(ignoreInit = T, c(input$heatctrl, input$heatlog, 
+                                 input$heatgrp, input$heatori), 
+               handlerExpr = {
+                 h = makeOneHeatmap(proc_data, 
+                                    input$condselect, input$timeselect, input$ctrlselect, input$timectrlselect,
+                                    input$heatctrl, input$heatlog, input$heatgrp, input$heatori)
+                 proc_heat <<- h
+                 output$heatmap = renderPlot(h, res = 96)
+               })
   
   update_ori = function()
   {
@@ -879,21 +933,34 @@ server <- function(input, output, session) {
     }
   )
   
+  download_figure = function(file, plt, frmt, width, height)
+  {
+    if (frmt == 'pdf')
+    {
+      fnc = pdf
+    }
+    else if (frmt == 'png')
+    {
+      fnc = function(...){png(..., units='in', res=300)}
+    }
+    fnc(file = file, width = width, height = height)
+    plot(plt)
+    dev.off()
+  }
+  
   output$download_plt <- downloadHandler(
     filename = function(){paste('delta_delta_bar.', input$pltfrmt, sep='')},
     content = function(file)
     {
-      if (input$pltfrmt == 'pdf')
-      {
-        fnc = pdf
-      }
-      else if (input$pltfrmt == 'png')
-      {
-        fnc = function(...){png(..., units='in', res=300)}
-      }
-      fnc(file = file, width = input$width, height = input$height)
-      plot(proc_plot)
-      dev.off()
+      download_figure(file, proc_plot, input$pltfrmt, input$width, input$height)
+    }
+  )
+  
+  output$download_heat <- downloadHandler(
+    filename = function(){paste('delta_delta_heat.', input$heatfrmt, sep='')},
+    content = function(file)
+    {
+      download_figure(file, proc_heat, input$heatfrmt, input$heatwidth, input$heatheight)
     }
   )
   
@@ -901,17 +968,7 @@ server <- function(input, output, session) {
     filename = function(){paste('dilution_lines.', input$dilpltfrmt, sep='')},
     content = function(file)
     {
-      if (input$dilpltfrmt == 'pdf')
-      {
-        fnc = pdf
-      }
-      else if (input$dilpltfrmt == 'png')
-      {
-        fnc = function(...){png(..., units='in', res=300)}
-      }
-      fnc(file = file, width = input$dilwidth, height = input$dilheight)
-      plot(proc_dilplot)
-      dev.off()
+      download_figure(file, proc_dilplot, input$dilpltfrmt, input$dilwidth, input$dilheight)
     }
   )
 }
