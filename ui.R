@@ -1,14 +1,28 @@
-require(shiny)
-require(shinyjs)
-require(shinyFeedback)
-require(ggplot2)
+# install.packages(c(
+#   "shiny",
+#   "shinyjs",
+#   "shinyFeedback",
+#   "ggplot2",
+#   "purrr",
+#   "dplyr",
+#   "tidyr",
+#   "BiocManager"
+# ))
+# 
+# BiocManager::install("ComplexHeatmap")
+
+library(shiny)
+library(shinyjs)
+library(shinyFeedback)
+library(ggplot2)
+
 
 source(file.path('global_vars.R'),  local = TRUE)
 
 # Define UI ----
 ui <- fluidPage(
-  useShinyFeedback(),
-  useShinyjs(),
+  shinyFeedback::useShinyFeedback(),
+  shinyjs::useShinyjs(),
   withMathJax(),
   titlePanel(title_str),
   sidebarLayout(

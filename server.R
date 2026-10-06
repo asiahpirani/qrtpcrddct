@@ -1,4 +1,5 @@
 
+<<<<<<< Updated upstream
 require(shiny)
 require(shinyjs)
 require(shinyFeedback)
@@ -6,6 +7,15 @@ require(ggplot2)
 require(purrr)
 require(dplyr)
 require(tidyr)
+=======
+library(shiny)
+library(shinyjs)
+library(shinyFeedback)
+library(ggplot2)
+library(purrr)
+library(dplyr)
+library(tidyr)
+>>>>>>> Stashed changes
 library(ComplexHeatmap)
 
 source(file.path('global_vars.R'),  local = TRUE)
@@ -17,6 +27,7 @@ makeDeltaDelta = function(data, cond_col, uconditions, times_col, utimes, rep_co
                           ctrl, timecntrl, housekeeping, target,
                           eff_matrix)
 {
+  # DEBUG
   print(uconditions)
   print(utimes)
   all_genes = c(housekeeping, target)
@@ -488,6 +499,7 @@ server <- function(input, output, session) {
     {
       file <- input$infile
       check = !is.null(file)
+      # DEBUG
       print(check)
       feedbackWarning(inputId = 'infile', show=!check, text = "Please select an input file.")
       # validate(need(check, "Please select an input file."))
@@ -515,6 +527,7 @@ server <- function(input, output, session) {
     updateSelectInput(inputId = 'ctrlselect',     choices = c(""), selected="")
     updateSelectInput(inputId = 'timectrlselect', choices = c(""), selected="")
     
+    # DEBUG
     print('check update')
     print(input$ctrlselect)
     print(input$timectrlselect)
