@@ -304,28 +304,70 @@ makeDeltaDelta = function(data, cond_col, uconditions, times_col, utimes, rep_co
   return(res_agg)
 }
 
-makeOneHeatmap = function(data, 
-                          cond_select, time_select, ctrl, timectrl, 
-                          addctrl, heatlog, heatgrp, heatori)
+prepare_display_data <- function(
+    data,
+    cond_select,
+    time_select,
+    ctrl,
+    timectrl,
+    hide_control)
 {
-  if (addctrl == 2)
+  if (hide_control == 2)
   {
-    if (cond_select!="NA" && time_select!="NA")
+    if (
+      cond_select != "NA" &&
+      time_select != "NA"
+    )
     {
-      data = data %>% filter(Conditions != ctrl | Times != timectrl)
+      data <- data %>%
+        filter(
+          Conditions != ctrl |
+            Times != timectrl
+        )
     }
-    else
+    else if (cond_select != "NA")
     {
-      if (cond_select!="NA")
-      {
-        data = data %>% filter(Conditions != ctrl)
-      }
-      if (time_select!="NA")
-      {
-        data = data %>% filter(Times != timectrl)
-      }
+      data <- data %>%
+        filter(Conditions != ctrl)
+    }
+    else if (time_select != "NA")
+    {
+      data <- data %>%
+        filter(Times != timectrl)
     }
   }
+  
+  if (nrow(data) == 0)
+  {
+    stop(
+      paste0(
+        "No data remain after hiding the control/baseline group. ",
+        "Show the control or include additional conditions/time points."
+      )
+    )
+  }
+  
+  return(data)
+}
+
+makeOneHeatmap = function(data,
+                          cond_select,
+                          time_select,
+                          ctrl,
+                          timectrl,
+                          addctrl,
+                          heatlog,
+                          heatgrp,
+                          heatori)
+{
+  data <- prepare_display_data(
+    data = data,
+    cond_select = cond_select,
+    time_select = time_select,
+    ctrl = ctrl,
+    timectrl = timectrl,
+    hide_control = addctrl
+  )
   
   genes = unique(data$Target)
   if (heatlog == 2)
@@ -343,27 +385,29 @@ makeOneHeatmap = function(data,
   return(h)
 }
 
-makeOnePlot = function(data, cond_select, time_select, ctrl, timectrl, houses, genes, addctrl, addlog, addmin, addgrp, plotori)
+makeOnePlot = function(
+    data,
+    cond_select,
+    time_select,
+    ctrl,
+    timectrl,
+    houses,
+    genes,
+    addctrl,
+    addlog,
+    addmin,
+    addgrp,
+    plotori)
 {
   
-  if (addctrl == 2)
-  {
-    if (cond_select!="NA" && time_select!="NA")
-    {
-      data = data %>% filter(Conditions != ctrl | Times != timectrl)
-    }
-    else
-    {
-      if (cond_select!="NA")
-      {
-        data = data %>% filter(Conditions != ctrl)
-      }
-      if (time_select!="NA")
-      {
-        data = data %>% filter(Times != timectrl)
-      }
-    }
-  }
+  data <- prepare_display_data(
+    data = data,
+    cond_select = cond_select,
+    time_select = time_select,
+    ctrl = ctrl,
+    timectrl = timectrl,
+    hide_control = addctrl
+  )
   
   if (addlog == 2)
   {
@@ -486,6 +530,248 @@ makeOnePlot = function(data, cond_select, time_select, ctrl, timectrl, houses, g
     # theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
     # theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
   return(p)
+}
+
+is_selected_col <- function(x)
+{
+  !is.null(x) &&
+    length(x) == 1 &&
+    !is.na(x) &&
+    x != "" &&
+    x != "NA"
+}
+
+validate_design_inputs <- function(
+    data,
+    rep_col,
+    tech_col,
+    cond_col,
+    time_col,
+    housekeeping,
+    targets,
+    included_conditions,
+    included_times,
+    control_condition,
+    control_time)
+{
+  errors <- character()
+  
+  add_error <- function(msg)
+  {
+    errors <<- c(errors, msg)
+  }
+  
+  # --------------------------------------------------
+  # Basic data check
+  # --------------------------------------------------
+  
+  if (!is.data.frame(data))
+  {
+    add_error("Input data is not a valid data frame.")
+  }
+  
+  if (nrow(data) == 0)
+  {
+    add_error("Input data contains no rows.")
+  }
+  
+  if (ncol(data) == 0)
+  {
+    add_error("Input data contains no columns.")
+  }
+  
+  
+  # --------------------------------------------------
+  # Required selections
+  # --------------------------------------------------
+  
+  if (!is_selected_col(rep_col))
+  {
+    add_error("Please select the biological replicate column.")
+  }
+  
+  cond_enabled <- is_selected_col(cond_col)
+  time_enabled <- is_selected_col(time_col)
+  tech_enabled <- is_selected_col(tech_col)
+  
+  if (!cond_enabled && !time_enabled)
+  {
+    add_error("Please select at least a condition column or a time column.")
+  }
+  
+  if (is.null(housekeeping) || length(housekeeping) == 0)
+  {
+    add_error("Please select at least one reference gene.")
+  }
+  
+  if (is.null(targets) || length(targets) == 0)
+  {
+    add_error("Please select at least one target gene.")
+  }
+  
+  
+  # --------------------------------------------------
+  # Selected columns must exist
+  # --------------------------------------------------
+  
+  selected_columns <- c(
+    if (is_selected_col(rep_col)) rep_col,
+    if (tech_enabled) tech_col,
+    if (cond_enabled) cond_col,
+    if (time_enabled) time_col,
+    housekeeping,
+    targets
+  )
+  
+  missing_columns <- setdiff(
+    selected_columns,
+    colnames(data)
+  )
+  
+  if (length(missing_columns) > 0)
+  {
+    add_error(
+      paste0(
+        "These selected columns do not exist in the input data: ",
+        paste(missing_columns, collapse = ", ")
+      )
+    )
+  }
+  
+  
+  # --------------------------------------------------
+  # Reference and target genes must not overlap
+  # --------------------------------------------------
+  
+  overlap_genes <- intersect(
+    housekeeping,
+    targets
+  )
+  
+  if (length(overlap_genes) > 0)
+  {
+    add_error(
+      paste0(
+        "The same gene cannot be both reference and target: ",
+        paste(overlap_genes, collapse = ", ")
+      )
+    )
+  }
+  
+  
+  # --------------------------------------------------
+  # Metadata columns must be different
+  # --------------------------------------------------
+  
+  metadata_cols <- c(
+    if (is_selected_col(rep_col)) rep_col,
+    if (tech_enabled) tech_col,
+    if (cond_enabled) cond_col,
+    if (time_enabled) time_col
+  )
+  
+  if (anyDuplicated(metadata_cols))
+  {
+    add_error(
+      paste0(
+        "Biological replicate, technical replicate, condition, ",
+        "and time must use different columns."
+      )
+    )
+  }
+  
+  
+  # --------------------------------------------------
+  # Gene columns must not also be metadata columns
+  # --------------------------------------------------
+  
+  all_genes <- c(
+    housekeeping,
+    targets
+  )
+  
+  metadata_gene_overlap <- intersect(
+    metadata_cols,
+    all_genes
+  )
+  
+  if (length(metadata_gene_overlap) > 0)
+  {
+    add_error(
+      paste0(
+        "These columns were selected both as metadata and gene values: ",
+        paste(metadata_gene_overlap, collapse = ", ")
+      )
+    )
+  }
+  
+  
+  # --------------------------------------------------
+  # Condition checks
+  # --------------------------------------------------
+  
+  if (cond_enabled)
+  {
+    if (is.null(included_conditions) ||
+        length(included_conditions) == 0)
+    {
+      add_error("Please select at least one condition to include.")
+    }
+    
+    if (is.null(control_condition) ||
+        control_condition == "")
+    {
+      add_error("Please select a control condition.")
+    }
+    else
+    {
+      if (!(control_condition %in% included_conditions))
+      {
+        add_error(
+          "The control condition must be included in the selected conditions."
+        )
+      }
+    }
+  }
+  
+  
+  # --------------------------------------------------
+  # Time checks
+  # --------------------------------------------------
+  
+  if (time_enabled)
+  {
+    if (is.null(included_times) ||
+        length(included_times) == 0)
+    {
+      add_error("Please select at least one time point to include.")
+    }
+    
+    if (is.null(control_time) ||
+        control_time == "")
+    {
+      add_error("Please select the baseline/T0 time point.")
+    }
+    else
+    {
+      if (!(control_time %in% included_times))
+      {
+        add_error(
+          "The baseline/T0 time point must be included in the selected time points."
+        )
+      }
+    }
+  }
+  
+  
+  # --------------------------------------------------
+  # Return
+  # --------------------------------------------------
+  
+  list(
+    ok = length(errors) == 0,
+    errors = unique(errors)
+  )
 }
 
 # Define server logic ----
@@ -761,49 +1047,49 @@ server <- function(input, output, session) {
                })
   
   output$tabres <- renderTable(my_tab())
-  
-  observeEvent(eventExpr = input$condselect, handlerExpr = {
-    condcol = input$condselect
-    if (condcol != "")
-    {
-      cid = which(colnames(my_tab()) == condcol)
-      updateSelectizeInput(inputId = 'condincselect', choices = unique(my_tab()[,cid]), selected = unique(my_tab()[,cid]))
-      updateSelectInput(inputId = 'ctrlselect', choices = unique(my_tab()[,cid]))
-    }
-  })
-  
-  observeEvent(eventExpr = input$timeselect, handlerExpr = {
-    timecol = input$timeselect
-    if (timecol != "")
-    {
-      cid = which(colnames(my_tab()) == timecol)
-      updateSelectizeInput(inputId = 'timeincselect', choices = unique(my_tab()[,cid]), selected = unique(my_tab()[,cid]))
-      updateSelectInput(inputId = 'timectrlselect', choices = unique(my_tab()[,cid]))
-    }
-  })
 
-  processAndPlot = function()
-  {
-    cond_check  = input$condselect != "NA"
-    time_check  = input$timeselect != "NA"
-    ctrl_check  = input$ctrlselect != ""
-    timectrl_check  = input$timectrlselect != ""
-    house_check = !is.null(input$houseselect)
-    gene_check  = !is.null(input$geneselect)
-    
-    feedbackWarning(inputId = 'condselect',  show=(!cond_check && !time_check),  text = "Please select the condition or time column.")
-    feedbackWarning(inputId = 'timeselect',  show=(!cond_check && !time_check),  text = "Please select the time or condition column.")
-    feedbackWarning(inputId = 'ctrlselect',  show=(!ctrl_check && cond_check),  text = "Please select the Control label.")
-    feedbackWarning(inputId = 'timectrlselect',  show=(!timectrl_check && time_check),  text = "Please select the T0 label.")
-    feedbackWarning(inputId = 'houseselect', show=!house_check, text = "Please select the house keeping gene(s).")
-    feedbackWarning(inputId = 'geneselect',  show=!gene_check,  text = "Please select the target gene(s).")
-    
-    req(cond_check||time_check)
-    req(ctrl_check||!cond_check)
-    req(timectrl_check||!time_check)
-    req(house_check)
-    req(gene_check)
-    
+    processAndPlot <- function()
+    {
+      data_input <- my_tab()
+      req(data_input)
+      
+      validation <- validate_design_inputs(
+        data = data_input,
+        
+        rep_col = input$repselect,
+        tech_col = input$techselect,
+        
+        cond_col = input$condselect,
+        time_col = input$timeselect,
+        
+        housekeeping = input$houseselect,
+        targets = input$geneselect,
+        
+        included_conditions = input$condincselect,
+        included_times = input$timeincselect,
+        
+        control_condition = input$ctrlselect,
+        control_time = input$timectrlselect
+      )
+      
+      if (!validation$ok)
+      {
+        for (msg in validation$errors)
+        {
+          showNotification(
+            msg,
+            type = "error",
+            duration = NULL
+          )
+        }
+        
+        return(invisible(FALSE))
+      }
+      
+      # --------------------------------------------------
+      # Efficiency validation/calculation starts here
+      # --------------------------------------------------
+
     if (input$effradio == 1)
     {
       for (g in all_genes())
@@ -1036,28 +1322,139 @@ server <- function(input, output, session) {
     hideFeedback("geneselect")
   })
   
-  observeEvent(input$timeselect, handlerExpr = {
-    hideFeedback("timeselect")
-  })
-  observeEvent(input$timeincselect, ignoreNULL = FALSE, ignoreInit = T, handlerExpr = {
-    if(is.null(input$timeincselect))
+  observeEvent(input$timeselect, {
+    
+    timecol <- input$timeselect
+    
+    if (is_selected_col(timecol))
     {
-      updateSelectizeInput(inputId = 'timeincselect', selected = input$timectrlselect)
-      showNotification("Selection could not be empty.", type = 'error')
+      cid <- which(
+        colnames(my_tab()) == timecol
+      )
+      
+      vals <- unique(
+        my_tab()[, cid]
+      )
+      
+      updateSelectizeInput(
+        inputId = "timeincselect",
+        choices = vals,
+        selected = vals
+      )
+      
+      updateSelectInput(
+        inputId = "timectrlselect",
+        choices = vals
+      )
     }
-    updateSelectInput(inputId = 'timectrlselect', choices = input$timeincselect)
-  })
-  observeEvent(input$condselect, handlerExpr = {
-    hideFeedback("condselect")
-  })
-  observeEvent(input$condincselect, ignoreNULL = FALSE, ignoreInit = T, handlerExpr = {
-    if(is.null(input$condincselect))
+    else
     {
-      updateSelectizeInput(inputId = 'condincselect', selected = input$ctrlselect)
-      showNotification("Selection could not be empty.", type = 'error')
+      updateSelectizeInput(
+        inputId = "timeincselect",
+        choices = character(0),
+        selected = character(0)
+      )
+      
+      updateSelectInput(
+        inputId = "timectrlselect",
+        choices = character(0)
+      )
     }
-    updateSelectInput(inputId = 'ctrlselect', choices = input$condincselect)
   })
+  observeEvent(
+    input$timeincselect,
+    ignoreNULL = FALSE,
+    ignoreInit = TRUE,
+    handlerExpr = {
+      
+      if (is.null(input$timeincselect))
+      {
+        updateSelectizeInput(
+          inputId = "timeincselect",
+          selected = input$timectrlselect
+        )
+        
+        showNotification(
+          "Selection could not be empty.",
+          type = "error"
+        )
+        
+        return()
+      }
+      
+      updateSelectInput(
+        inputId = "timectrlselect",
+        choices = input$timeincselect
+      )
+    }
+  )
+
+  observeEvent(input$condselect, {
+    
+    condcol <- input$condselect
+    
+    if (is_selected_col(condcol))
+    {
+      cid <- which(
+        colnames(my_tab()) == condcol
+      )
+      
+      vals <- unique(
+        my_tab()[, cid]
+      )
+      
+      updateSelectizeInput(
+        inputId = "condincselect",
+        choices = vals,
+        selected = vals
+      )
+      
+      updateSelectInput(
+        inputId = "ctrlselect",
+        choices = vals
+      )
+    }
+    else
+    {
+      updateSelectizeInput(
+        inputId = "condincselect",
+        choices = character(0),
+        selected = character(0)
+      )
+      
+      updateSelectInput(
+        inputId = "ctrlselect",
+        choices = character(0)
+      )
+    }
+  })
+  observeEvent(
+    input$condincselect,
+    ignoreNULL = FALSE,
+    ignoreInit = TRUE,
+    handlerExpr = {
+      
+      if (is.null(input$condincselect))
+      {
+        updateSelectizeInput(
+          inputId = "condincselect",
+          selected = input$ctrlselect
+        )
+        
+        showNotification(
+          "Selection could not be empty.",
+          type = "error"
+        )
+        
+        return()
+      }
+      
+      updateSelectInput(
+        inputId = "ctrlselect",
+        choices = input$condincselect
+      )
+    }
+  )
   observeEvent(input$timectrlselect, handlerExpr = {
     hideFeedback("timectrlselect")
   })
