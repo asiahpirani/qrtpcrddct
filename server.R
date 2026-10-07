@@ -9,8 +9,8 @@ library(ComplexHeatmap)
 
 source(file.path('global_vars.R'),  local = TRUE)
 
-isLoaded = F
-isProcessed = F
+# isLoaded = F
+# isProcessed = F
 
 makeDeltaDelta = function(data, cond_col, uconditions, times_col, utimes, rep_col, tech_col,
                           ctrl, timecntrl, housekeeping, target,
@@ -491,6 +491,34 @@ makeOnePlot = function(data, cond_select, time_select, ctrl, timectrl, houses, g
 # Define server logic ----
 server <- function(input, output, session) {
   # disable("makeplot")
+  state <- reactiveValues(
+    dilution_data    = NULL,
+    dilution_summary = NULL,
+    processed_data   = NULL,
+    main_plot        = NULL,
+    heatmap           = NULL,
+    dilution_plot    = NULL
+  )
+  output$diltabres <- renderTable({
+    req(state$dilution_data)
+    state$dilution_data
+  })
+  
+  output$dilplot <- renderPlot({
+    req(state$dilution_plot)
+    print(state$dilution_plot)
+  }, res = 96)
+  
+  output$plot <- renderPlot({
+    req(state$main_plot)
+    print(state$main_plot)
+  }, res = 96)
+  
+  output$heatmap <- renderPlot({
+    req(state$heatmap)
+    ComplexHeatmap::draw(state$heatmap)
+  }, res = 96)
+  
   
   hideTab(inputId = 'mainpagetab', target = plot_tab_title)
   hideTab(inputId = 'mainpagetab', target = dilution_tab_title)
@@ -631,13 +659,14 @@ server <- function(input, output, session) {
     enable("dilcpselect")
     enable("dilcdnaselect")
     
-    my_dil_tab <<- loadeddata
-    
-    output$diltabres <- renderTable({loadeddata})
+    state$dilution_data <- loadeddata
   })
   
-  processDil = function()
+  processDil <- function()
   {
+    req(state$dilution_data)
+    
+    dil_data <- state$dilution_data
     # rep_check  = input$dilrepselect != 'NA'
     # tech_check = input$diltechselect != 'NA'
     # cond_check = input$dilcondselect != 'NA'
@@ -682,9 +711,16 @@ server <- function(input, output, session) {
       slope = coefficients(lm(yy ~ xx))[2]
       return(10^(-1/slope))
     }
-    dil_sum <<- my_dil_tab %>% group_by_at(col_list) %>%
-      summarise(eff=calc_slope(cur_data()[, input$dilcdnaselect], cur_data()[, input$dilcpselect])) %>%
+    state$dilution_summary <- dil_data %>%
+      group_by_at(col_list) %>%
+      summarise(
+        eff = calc_slope(
+          cur_data()[, input$dilcdnaselect],
+          cur_data()[, input$dilcpselect]
+        )
+      ) %>%
       as.data.frame()
+    dil_sum <- state$dilution_summary
     
     # print(dil_sum)
     
@@ -698,7 +734,7 @@ server <- function(input, output, session) {
       leg = c(leg, ss)
     }
     
-    p <- ggplot(my_dil_tab, aes(x=cDNA.Input, y=Cycle, col=Gene)) + 
+    p <- ggplot(dil_data, aes(x=cDNA.Input, y=Cycle, col=Gene)) +
       geom_point() + 
       scale_x_continuous(trans='log10') + 
       geom_smooth(method = "lm", se=F, formula = y ~ x) + 
@@ -706,8 +742,7 @@ server <- function(input, output, session) {
       theme(legend.position = c(0.8, 0.8)) +
       scale_color_discrete(labels=leg)
     
-    proc_dilplot <<- p
-    output$dilplot = renderPlot(p, res = 96)
+    state$dilution_plot <- p
     # print(dil_sum)
     # dil_sum_wide <<- dil_sum %>% spread(input$dilgeneselect, 'eff')
     # print(dil_sum_wide)
@@ -784,17 +819,30 @@ server <- function(input, output, session) {
     }
     if (input$effradio == 2)
     {
+      req(state$dilution_summary)
+      
+      dil_sum <- state$dilution_summary
+      
       for (g in all_genes())
       {
-        c_check = sum(dil_sum[, 1] == g) == 1
+        c_check <- sum(dil_sum[, 1] == g) == 1
+        
         if (!c_check)
         {
-          showNotification(paste('Dilution method efficiency is not provided for ', g, sep=''), type='error')
+          showNotification(
+            paste(
+              "Dilution method efficiency is not provided for ",
+              g,
+              sep = ""
+            ),
+            type = "error"
+          )
         }
       }
+      
       for (g in all_genes())
       {
-        c_check = sum(dil_sum[, 1] == g) == 1
+        c_check <- sum(dil_sum[, 1] == g) == 1
         req(c_check)
       }
     }
@@ -811,9 +859,17 @@ server <- function(input, output, session) {
     }
     if (input$effradio == 2)
     {
+      req(state$dilution_summary)
+      
+      dil_sum <- state$dilution_summary
+      
       for (g in all_genes())
       {
-        eff_matrix[, g] = dil_sum[dil_sum[, 1]==g, 'eff']
+        eff_matrix[, g] <-
+          state$dilution_summary[
+            state$dilution_summary[, 1] == g,
+            "eff"
+          ]
       }
     }
     
@@ -861,25 +917,25 @@ server <- function(input, output, session) {
     
     update_ori()
     
-    proc_data <<- data
+    state$processed_data <- data
     p = makeOnePlot(data, input$condselect, input$timeselect, input$ctrlselect, input$timectrlselect, 
                     input$houseselect, input$geneselect,
                     input$plotctrl, input$plotlog, input$ploterr, input$plotgrp, input$plotori)
     
     
-    proc_plot <<- p
+    state$main_plot <- p
     
     h = makeOneHeatmap(data, 
                        input$condselect, input$timeselect, input$ctrlselect, input$timectrlselect,
                        input$heatctrl, input$heatlog, input$heatgrp, input$heatori)
-    proc_heat <<- h
-    output$heatmap = renderPlot(h, res = 96)
+    state$heatmap <- h
+    
     
     
     showTab(inputId = 'mainpagetab', target = plot_tab_title)
     showTab(inputId = 'mainpagetab', target = heatmap_tab_title)
     updateNavbarPage(inputId = 'mainpagetab', selected = plot_tab_title)
-    output$plot = renderPlot(p, res = 96)
+    
   }
   
   observeEvent(ignoreInit = T, input$processb, 
@@ -887,28 +943,65 @@ server <- function(input, output, session) {
       processAndPlot()
   })
   
-  observeEvent(ignoreInit = T, c(input$plotctrl, input$plotlog, 
-                                 input$ploterr, input$plotgrp,
-                                 input$plotori), 
+  observeEvent(
+    ignoreInit = TRUE,
+    c(
+      input$plotctrl,
+      input$plotlog,
+      input$ploterr,
+      input$plotgrp,
+      input$plotori
+    ),
     handlerExpr = {
-      p = makeOnePlot(proc_data, 
-                      input$condselect, input$timeselect, 
-                      input$ctrlselect, input$timectrlselect, 
-                      input$houseselect, input$geneselect,
-                      input$plotctrl, input$plotlog, input$ploterr, input$plotgrp, input$plotori)
-      proc_plot <<- p
-      output$plot = renderPlot(p, res = 96)
-  })
+      
+      req(state$processed_data)
+      
+      p <- makeOnePlot(
+        state$processed_data,
+        input$condselect,
+        input$timeselect,
+        input$ctrlselect,
+        input$timectrlselect,
+        input$houseselect,
+        input$geneselect,
+        input$plotctrl,
+        input$plotlog,
+        input$ploterr,
+        input$plotgrp,
+        input$plotori
+      )
+      
+      state$main_plot <- p
+    }
+  )
   
-  observeEvent(ignoreInit = T, c(input$heatctrl, input$heatlog, 
-                                 input$heatgrp, input$heatori), 
-               handlerExpr = {
-                 h = makeOneHeatmap(proc_data, 
-                                    input$condselect, input$timeselect, input$ctrlselect, input$timectrlselect,
-                                    input$heatctrl, input$heatlog, input$heatgrp, input$heatori)
-                 proc_heat <<- h
-                 output$heatmap = renderPlot(h, res = 96)
-               })
+  observeEvent(
+    ignoreInit = TRUE,
+    c(
+      input$heatctrl,
+      input$heatlog,
+      input$heatgrp,
+      input$heatori
+    ),
+    handlerExpr = {
+      
+      req(state$processed_data)
+      
+      h <- makeOneHeatmap(
+        state$processed_data,
+        input$condselect,
+        input$timeselect,
+        input$ctrlselect,
+        input$timectrlselect,
+        input$heatctrl,
+        input$heatlog,
+        input$heatgrp,
+        input$heatori
+      )
+      
+      state$heatmap <- h
+    }
+  )
   
   update_ori = function()
   {
@@ -996,30 +1089,75 @@ server <- function(input, output, session) {
     filename = function(){'delta_delta.csv'},
     content = function(file)
     {
-      write.csv(proc_data, file)
+      req(state$processed_data)
+      
+      write.csv(
+        state$processed_data,
+        file,
+        row.names = FALSE
+      )
     }
   )
   
-  download_figure = function(file, plt, frmt, width, height)
+  
+  
+  download_figure <- function(file, plt, frmt, width, height)
   {
-    if (frmt == 'pdf')
+    if (frmt == "pdf")
     {
-      fnc = pdf
+      grDevices::pdf(
+        file = file,
+        width = width,
+        height = height
+      )
     }
-    else if (frmt == 'png')
+    else if (frmt == "png")
     {
-      fnc = function(...){png(..., units='in', res=300)}
+      grDevices::png(
+        filename = file,
+        width = width,
+        height = height,
+        units = "in",
+        res = 300
+      )
     }
-    fnc(file = file, width = width, height = height)
-    plot(plt)
-    dev.off()
+    else
+    {
+      stop("Unsupported output format.")
+    }
+    
+    on.exit(grDevices::dev.off(), add = TRUE)
+    
+    if (inherits(plt, c("Heatmap", "HeatmapList")))
+    {
+      ComplexHeatmap::draw(plt)
+    }
+    else
+    {
+      print(plt)
+    }
   }
   
   output$download_plt <- downloadHandler(
-    filename = function(){paste('delta_delta_bar.', input$pltfrmt, sep='')},
+    filename = function()
+    {
+      paste0(
+        "delta_delta_bar.",
+        input$pltfrmt
+      )
+    },
+    
     content = function(file)
     {
-      download_figure(file, proc_plot, input$pltfrmt, input$width, input$height)
+      req(state$main_plot)
+      
+      download_figure(
+        file,
+        state$main_plot,
+        input$pltfrmt,
+        input$width,
+        input$height
+      )
     }
   )
   
@@ -1027,7 +1165,15 @@ server <- function(input, output, session) {
     filename = function(){paste('delta_delta_heat.', input$heatfrmt, sep='')},
     content = function(file)
     {
-      download_figure(file, proc_heat, input$heatfrmt, input$heatwidth, input$heatheight)
+      req(state$heatmap)
+      
+      download_figure(
+        file,
+        state$heatmap,
+        input$heatfrmt,
+        input$heatwidth,
+        input$heatheight
+      )
     }
   )
   
@@ -1035,7 +1181,15 @@ server <- function(input, output, session) {
     filename = function(){paste('dilution_lines.', input$dilpltfrmt, sep='')},
     content = function(file)
     {
-      download_figure(file, proc_dilplot, input$dilpltfrmt, input$dilwidth, input$dilheight)
+      req(state$dilution_plot)
+      
+      download_figure(
+        file,
+        state$dilution_plot,
+        input$dilpltfrmt,
+        input$dilwidth,
+        input$dilheight
+      )
     }
   )
 }
