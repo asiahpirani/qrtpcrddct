@@ -774,6 +774,238 @@ validate_design_inputs <- function(
   )
 }
 
+get_analysis_subset <- function(
+    data,
+    cond_col,
+    time_col,
+    included_conditions,
+    included_times)
+{
+  keep <- rep(TRUE, nrow(data))
+  
+  if (is_selected_col(cond_col))
+  {
+    keep <- keep &
+      data[[cond_col]] %in% included_conditions
+  }
+  
+  if (is_selected_col(time_col))
+  {
+    keep <- keep &
+      data[[time_col]] %in% included_times
+  }
+  
+  data[
+    keep,
+    ,
+    drop = FALSE
+  ]
+}
+
+validate_ct_values <- function(
+    data,
+    cond_col,
+    time_col,
+    included_conditions,
+    included_times,
+    housekeeping,
+    targets,
+    warning_low = 5,
+    warning_high = 40)
+{
+  errors <- character()
+  warnings <- character()
+  
+  add_error <- function(msg)
+  {
+    errors <<- c(errors, msg)
+  }
+  
+  add_warning <- function(msg)
+  {
+    warnings <<- c(warnings, msg)
+  }
+  
+  
+  # --------------------------------------------------
+  # Only validate rows that will actually be analysed
+  # --------------------------------------------------
+  
+  analysis_data <- get_analysis_subset(
+    data = data,
+    cond_col = cond_col,
+    time_col = time_col,
+    included_conditions = included_conditions,
+    included_times = included_times
+  )
+  
+  
+  if (nrow(analysis_data) == 0)
+  {
+    add_error(
+      "No rows remain after applying the selected conditions/time points."
+    )
+    
+    return(
+      list(
+        ok = FALSE,
+        errors = errors,
+        warnings = warnings
+      )
+    )
+  }
+  
+  
+  # --------------------------------------------------
+  # Ct columns
+  # --------------------------------------------------
+  
+  genes <- unique(
+    c(
+      housekeeping,
+      targets
+    )
+  )
+  
+  
+  for (gene in genes)
+  {
+    x <- analysis_data[[gene]]
+    
+    
+    # -----------------------------
+    # Must be numeric
+    # -----------------------------
+    
+    if (!is.numeric(x))
+    {
+      x_text <- trimws(as.character(x))
+      
+      x_numeric <- suppressWarnings(
+        as.numeric(x_text)
+      )
+      
+      bad_text <- !is.na(x_text) &
+        x_text != "" &
+        is.na(x_numeric)
+      
+      if (any(bad_text))
+      {
+        bad_values <- unique(
+          x_text[bad_text]
+        )
+        
+        add_error(
+          paste0(
+            "Gene '",
+            gene,
+            "' contains non-numeric Ct/Cq value(s): ",
+            paste(
+              head(bad_values, 5),
+              collapse = ", "
+            ),
+            "."
+          )
+        )
+        
+        next
+      }
+      
+      x <- x_numeric
+    }
+    
+    
+    # -----------------------------
+    # Missing / non-finite values
+    # -----------------------------
+    
+    bad_missing <- is.na(x) |
+      is.nan(x) |
+      !is.finite(x)
+    
+    if (any(bad_missing))
+    {
+      add_error(
+        paste0(
+          "Gene '",
+          gene,
+          "' contains ",
+          sum(bad_missing),
+          " missing or non-finite Ct/Cq value(s)."
+        )
+      )
+    }
+    
+    
+    # -----------------------------
+    # Zero or negative Ct
+    # -----------------------------
+    
+    bad_nonpositive <- !bad_missing &
+      x <= 0
+    
+    if (any(bad_nonpositive))
+    {
+      add_error(
+        paste0(
+          "Gene '",
+          gene,
+          "' contains ",
+          sum(bad_nonpositive),
+          " Ct/Cq value(s) <= 0."
+        )
+      )
+    }
+    
+    
+    # -----------------------------
+    # Unusual but not necessarily invalid
+    # -----------------------------
+    
+    usable <- x[
+      is.finite(x) &
+        !is.na(x)
+    ]
+    
+    if (length(usable) > 0)
+    {
+      unusual <- usable < warning_low |
+        usable > warning_high
+      
+      if (any(unusual))
+      {
+        unusual_values <- usable[unusual]
+        
+        add_warning(
+          paste0(
+            "Gene '",
+            gene,
+            "' contains ",
+            length(unusual_values),
+            " unusual Ct/Cq value(s) outside ",
+            warning_low,
+            "-",
+            warning_high,
+            ". Range observed: ",
+            round(min(unusual_values), 2),
+            " to ",
+            round(max(unusual_values), 2),
+            "."
+          )
+        )
+      }
+    }
+  }
+  
+  
+  list(
+    ok = length(errors) == 0,
+    errors = unique(errors),
+    warnings = unique(warnings)
+  )
+}
+
+
 # Define server logic ----
 server <- function(input, output, session) {
   # disable("makeplot")
@@ -1086,6 +1318,77 @@ server <- function(input, output, session) {
         return(invisible(FALSE))
       }
       
+      analysis_data <- get_analysis_subset(
+        data = data_input,
+        
+        cond_col = input$condselect,
+        time_col = input$timeselect,
+        
+        included_conditions = input$condincselect,
+        included_times = input$timeincselect
+      )
+      
+      ct_validation <- validate_ct_values(
+        data = data_input,
+        
+        cond_col = input$condselect,
+        time_col = input$timeselect,
+        
+        included_conditions = input$condincselect,
+        included_times = input$timeincselect,
+        
+        housekeeping = input$houseselect,
+        targets = input$geneselect
+      )
+      
+      
+      # Stop on hard errors
+      if (!ct_validation$ok)
+      {
+        for (msg in ct_validation$errors)
+        {
+          showNotification(
+            msg,
+            type = "error",
+            duration = NULL
+          )
+        }
+        
+        return(invisible(FALSE))
+      }
+      
+      ct_genes <- unique(
+        c(
+          input$houseselect,
+          input$geneselect
+        )
+      )
+      
+      for (gene in ct_genes)
+      {
+        analysis_data[[gene]] <-
+          suppressWarnings(
+            as.numeric(
+              as.character(
+                analysis_data[[gene]]
+              )
+            )
+          )
+      }
+      
+      # Show warnings, but continue
+      if (length(ct_validation$warnings) > 0)
+      {
+        for (msg in ct_validation$warnings)
+        {
+          showNotification(
+            msg,
+            type = "warning",
+            duration = 10
+          )
+        }
+      }
+      
       # --------------------------------------------------
       # Efficiency validation/calculation starts here
       # --------------------------------------------------
@@ -1133,14 +1436,21 @@ server <- function(input, output, session) {
       }
     }
     
-    eff = 2
-    eff_matrix = matrix(eff, dim(my_tab())[1], length(all_genes()))
-    colnames(eff_matrix) = all_genes()
+      eff <- 2
+      
+      eff_matrix <- matrix(
+        eff,
+        nrow(analysis_data),
+        length(all_genes())
+      )
+      
+      colnames(eff_matrix) <- all_genes()
     if (input$effradio == 1)
     {
       for (g in all_genes())
       {
-        eff_matrix[, g] = my_tab()[, input[[g]]]
+        eff_matrix[, g] <-
+          analysis_data[, input[[g]]]
       }
     }
     if (input$effradio == 2)
@@ -1159,7 +1469,7 @@ server <- function(input, output, session) {
       }
     }
     
-    data = makeDeltaDelta(my_tab(), input$condselect, input$condincselect, input$timeselect, input$timeincselect,
+    data = makeDeltaDelta(analysis_data, input$condselect, input$condincselect, input$timeselect, input$timeincselect,
                           input$repselect, input$techselect,
                           input$ctrlselect, input$timectrlselect,
                           input$houseselect, input$geneselect,
