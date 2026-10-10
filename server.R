@@ -1662,6 +1662,488 @@ validate_rotor_efficiency <- function(
   )
 }
 
+validate_dilution_curve <- function(
+    data,
+    gene_col,
+    ct_col,
+    concentration_col,
+    min_levels = 3,
+    recommended_levels = 5,
+    warning_eff_low = 1.8,
+    warning_eff_high = 2.2,
+    warning_r2 = 0.98)
+{
+  errors <- character()
+  warnings <- character()
+  
+  add_error <- function(msg)
+  {
+    errors <<- c(errors, msg)
+  }
+  
+  add_warning <- function(msg)
+  {
+    warnings <<- c(warnings, msg)
+  }
+  
+  
+  # --------------------------------------------------
+  # Required columns
+  # --------------------------------------------------
+  
+  selected_cols <- c(
+    gene_col,
+    ct_col,
+    concentration_col
+  )
+  
+  if (
+    !is_selected_col(gene_col) ||
+    !is_selected_col(ct_col) ||
+    !is_selected_col(concentration_col)
+  )
+  {
+    add_error(
+      "Please select gene, Ct/Cq, and concentration columns for the dilution curve."
+    )
+    
+    return(
+      list(
+        ok = FALSE,
+        errors = errors,
+        warnings = warnings,
+        data = NULL,
+        summary = NULL
+      )
+    )
+  }
+  
+  
+  missing_cols <- setdiff(
+    selected_cols,
+    colnames(data)
+  )
+  
+  if (length(missing_cols) > 0)
+  {
+    add_error(
+      paste0(
+        "These dilution-curve columns do not exist: ",
+        paste(missing_cols, collapse = ", "),
+        "."
+      )
+    )
+  }
+  
+  
+  if (anyDuplicated(selected_cols))
+  {
+    add_error(
+      "Gene, Ct/Cq, and concentration must use different columns."
+    )
+  }
+  
+  
+  if (length(errors) > 0)
+  {
+    return(
+      list(
+        ok = FALSE,
+        errors = unique(errors),
+        warnings = unique(warnings),
+        data = NULL,
+        summary = NULL
+      )
+    )
+  }
+  
+  
+  clean_data <- data
+  
+  
+  # --------------------------------------------------
+  # Gene names
+  # --------------------------------------------------
+  
+  gene_values <- trimws(
+    as.character(clean_data[[gene_col]])
+  )
+  
+  missing_gene <- is.na(gene_values) |
+    gene_values == ""
+  
+  if (any(missing_gene))
+  {
+    add_error(
+      paste0(
+        "The dilution-curve gene column contains ",
+        sum(missing_gene),
+        " missing/empty value(s)."
+      )
+    )
+  }
+  
+  
+  # --------------------------------------------------
+  # Convert Ct/Cq
+  # --------------------------------------------------
+  
+  ct_text <- trimws(
+    as.character(clean_data[[ct_col]])
+  )
+  
+  ct_numeric <- suppressWarnings(
+    as.numeric(ct_text)
+  )
+  
+  bad_ct_text <- !is.na(ct_text) &
+    ct_text != "" &
+    is.na(ct_numeric)
+  
+  if (any(bad_ct_text))
+  {
+    add_error(
+      paste0(
+        "Dilution-curve Ct/Cq column contains non-numeric value(s): ",
+        paste(
+          head(unique(ct_text[bad_ct_text]), 5),
+          collapse = ", "
+        ),
+        "."
+      )
+    )
+  }
+  
+  bad_ct <- (
+    is.na(ct_numeric) |
+      !is.finite(ct_numeric)
+  ) &
+    !bad_ct_text
+  
+  if (any(bad_ct))
+  {
+    add_error(
+      paste0(
+        "Dilution-curve Ct/Cq column contains ",
+        sum(bad_ct),
+        " missing or non-finite value(s)."
+      )
+    )
+  }
+  
+  valid_ct_numeric <-
+    !bad_ct_text &
+    !is.na(ct_numeric) &
+    is.finite(ct_numeric)
+  
+  bad_ct_nonpositive <-
+    valid_ct_numeric &
+    ct_numeric <= 0
+  
+  if (any(bad_ct_nonpositive))
+  {
+    add_error(
+      paste0(
+        "Dilution-curve Ct/Cq values must be greater than zero. ",
+        sum(bad_ct_nonpositive),
+        " invalid value(s) were found."
+      )
+    )
+  }
+  
+  
+  # --------------------------------------------------
+  # Convert concentration
+  # --------------------------------------------------
+  
+  conc_text <- trimws(
+    as.character(clean_data[[concentration_col]])
+  )
+  
+  conc_numeric <- suppressWarnings(
+    as.numeric(conc_text)
+  )
+  
+  bad_conc_text <- !is.na(conc_text) &
+    conc_text != "" &
+    is.na(conc_numeric)
+  
+  if (any(bad_conc_text))
+  {
+    add_error(
+      paste0(
+        "Dilution-curve concentration column contains non-numeric value(s): ",
+        paste(
+          head(unique(conc_text[bad_conc_text]), 5),
+          collapse = ", "
+        ),
+        "."
+      )
+    )
+  }
+  
+  bad_conc <- (
+    is.na(conc_numeric) |
+      !is.finite(conc_numeric)
+  ) &
+    !bad_conc_text
+  
+  if (any(bad_conc))
+  {
+    add_error(
+      paste0(
+        "Dilution-curve concentration column contains ",
+        sum(bad_conc),
+        " missing or non-finite value(s)."
+      )
+    )
+  }
+  
+  valid_conc_numeric <-
+    !bad_conc_text &
+    !is.na(conc_numeric) &
+    is.finite(conc_numeric)
+  
+  bad_conc_nonpositive <-
+    valid_conc_numeric &
+    conc_numeric <= 0
+  
+  if (any(bad_conc_nonpositive))
+  {
+    add_error(
+      paste0(
+        "Dilution-curve concentrations must be greater than zero. ",
+        sum(bad_conc_nonpositive),
+        " invalid value(s) were found."
+      )
+    )
+  }
+  
+  
+  if (length(errors) > 0)
+  {
+    return(
+      list(
+        ok = FALSE,
+        errors = unique(errors),
+        warnings = unique(warnings),
+        data = NULL,
+        summary = NULL
+      )
+    )
+  }
+  
+  
+  clean_data[[gene_col]] <- gene_values
+  clean_data[[ct_col]] <- ct_numeric
+  clean_data[[concentration_col]] <- conc_numeric
+  
+  
+  # --------------------------------------------------
+  # Fit one standard curve per gene
+  # --------------------------------------------------
+  
+  genes <- unique(gene_values)
+  
+  result_rows <- list()
+  
+  
+  for (gene in genes)
+  {
+    ids <- gene_values == gene
+    
+    x <- conc_numeric[ids]
+    y <- ct_numeric[ids]
+    
+    n_points <- length(x)
+    n_levels <- length(unique(x))
+    
+    
+    # ---------------------------------------------
+    # Number of dilution levels
+    # ---------------------------------------------
+    
+    if (n_levels < min_levels)
+    {
+      add_error(
+        paste0(
+          "Gene '",
+          gene,
+          "' has only ",
+          n_levels,
+          " unique dilution level(s). At least ",
+          min_levels,
+          " are required."
+        )
+      )
+      
+      next
+    }
+    
+    
+    if (n_levels < recommended_levels)
+    {
+      add_warning(
+        paste0(
+          "Gene '",
+          gene,
+          "' has only ",
+          n_levels,
+          " unique dilution levels. ",
+          recommended_levels,
+          " or more are recommended for a more informative standard curve."
+        )
+      )
+    }
+    
+    
+    # ---------------------------------------------
+    # Fit Ct ~ log10(concentration)
+    # ---------------------------------------------
+    
+    fit <- lm(
+      y ~ log10(x)
+    )
+    
+    slope <- unname(
+      coefficients(fit)[2]
+    )
+    
+    intercept <- unname(
+      coefficients(fit)[1]
+    )
+    
+    r2 <- summary(fit)$r.squared
+    
+    
+    # ---------------------------------------------
+    # Slope validity
+    # ---------------------------------------------
+    
+    if (
+      !is.finite(slope) ||
+      slope >= 0
+    )
+    {
+      add_error(
+        paste0(
+          "Gene '",
+          gene,
+          "' has an invalid standard-curve slope: ",
+          round(slope, 4),
+          ". Ct/Cq should decrease as template concentration increases."
+        )
+      )
+      
+      next
+    }
+    
+    
+    # ---------------------------------------------
+    # Calculate amplification factor
+    # ---------------------------------------------
+    
+    eff <- 10^(-1 / slope)
+    
+    if (
+      !is.finite(eff) ||
+      eff <= 1
+    )
+    {
+      add_error(
+        paste0(
+          "The calculated efficiency for gene '",
+          gene,
+          "' is invalid."
+        )
+      )
+      
+      next
+    }
+    
+    
+    # ---------------------------------------------
+    # Efficiency warning
+    # ---------------------------------------------
+    
+    if (
+      eff < warning_eff_low ||
+      eff > warning_eff_high
+    )
+    {
+      add_warning(
+        paste0(
+          "Gene '",
+          gene,
+          "' has an unusual calculated efficiency of ",
+          round(eff, 3),
+          " (expected warning range ",
+          warning_eff_low,
+          "-",
+          warning_eff_high,
+          ")."
+        )
+      )
+    }
+    
+    
+    # ---------------------------------------------
+    # R-squared warning
+    # ---------------------------------------------
+    
+    if (
+      !is.finite(r2) ||
+      r2 < warning_r2
+    )
+    {
+      add_warning(
+        paste0(
+          "Gene '",
+          gene,
+          "' has a low standard-curve R-squared: ",
+          round(r2, 4),
+          "."
+        )
+      )
+    }
+    
+    
+    result_rows[[length(result_rows) + 1]] <-
+      data.frame(
+        Gene = gene,
+        slope = slope,
+        intercept = intercept,
+        eff = eff,
+        r2 = r2,
+        n_points = n_points,
+        n_levels = n_levels,
+        stringsAsFactors = FALSE
+      )
+  }
+  
+  
+  if (length(result_rows) > 0)
+  {
+    summary_table <- do.call(
+      rbind,
+      result_rows
+    )
+  }
+  else
+  {
+    summary_table <- data.frame()
+  }
+  
+  
+  list(
+    ok = length(errors) == 0,
+    errors = unique(errors),
+    warnings = unique(warnings),
+    data = clean_data,
+    summary = summary_table
+  )
+}
+
 # Define server logic ----
 server <- function(input, output, session) {
   # disable("makeplot")
@@ -1834,6 +2316,8 @@ server <- function(input, output, session) {
     enable("dilcdnaselect")
     
     state$dilution_data <- loadeddata
+    state$dilution_summary <- NULL
+    state$dilution_plot <- NULL
   })
   
   processDil <- function()
@@ -1841,93 +2325,140 @@ server <- function(input, output, session) {
     req(state$dilution_data)
     
     dil_data <- state$dilution_data
-    # rep_check  = input$dilrepselect != 'NA'
-    # tech_check = input$diltechselect != 'NA'
-    # cond_check = input$dilcondselect != 'NA'
-    # time_check = input$diltimeselect != 'NA'
-    gene_check = input$dilgeneselect != 'NA'
-    cp_check   = input$dilcpselect != 'NA'
-    cdna_check = input$dilcdnaselect != 'NA'
+    # Invalidate any previous dilution result
+    state$dilution_summary <- NULL
+    state$dilution_plot <- NULL
     
-
-    # feedbackWarning(inputId = 'dilcondselect',  show=(!cond_check && !time_check), text = "Please select the condition or time column.")
-    # feedbackWarning(inputId = 'diltimeselect',  show=(!cond_check && !time_check), text = "Please select the time or condition column.")
-    # feedbackWarning(inputId = 'dilrepselect',   show=(!rep_check && !tech_check),  text = "Please select the biological or technical replicates\' column.")
-    # feedbackWarning(inputId = 'diltechselect',  show=(!rep_check && !tech_check),  text = "Please select the biological or technical replicates\' column.")
-    feedbackWarning(inputId = 'dilgeneselect',  show=!gene_check, text = "Please select the genes\' column.")
-    feedbackWarning(inputId = 'dilcpselect',    show=!cp_check,   text = "Please select the Cycles\' column.")
-    feedbackWarning(inputId = 'dilcdnaselect',  show=!cdna_check, text = "Please select the Concentrations\' column.")
-
-    # req(cond_check||time_check)
-    # req(rep_check||tech_check)
-    req(gene_check)
-    req(cp_check)
-    req(cdna_check)
-
-    col_list = c(input$dilgeneselect)
+    validation <- validate_dilution_curve(
+      data = dil_data,
+      
+      gene_col = input$dilgeneselect,
+      ct_col = input$dilcpselect,
+      concentration_col = input$dilcdnaselect
+    )
     
-    # all_checks = c(cond_check, time_check, gene_check, rep_check, tech_check)
-    # all_vals   = c(input$dilcondselect, input$diltimeselect,
-    #                input$dilgeneselect,
-    #                input$dilrepselect, input$diltechselect)
-    # col_list = c()
-    # for (i in 1:length(all_checks))
-    # {
-    #   if (all_checks[i])
-    #   {
-    #     col_list = c(col_list, all_vals[i])
-    #   }
-    # }
     
-    calc_slope = function(x, y){
-      xx = unlist(log10(x))
-      yy = unlist(y)
-      slope = coefficients(lm(yy ~ xx))[2]
-      return(10^(-1/slope))
-    }
-    state$dilution_summary <- dil_data %>%
-      group_by_at(col_list) %>%
-      summarise(
-        eff = calc_slope(
-          cur_data()[, input$dilcdnaselect],
-          cur_data()[, input$dilcpselect]
+    # --------------------------------------------------
+    # Errors
+    # --------------------------------------------------
+    
+    if (!validation$ok)
+    {
+      for (msg in validation$errors)
+      {
+        showNotification(
+          msg,
+          type = "error",
+          duration = NULL
         )
-      ) %>%
-      as.data.frame()
+      }
+      
+      return(invisible(FALSE))
+    }
+    
+    
+    # --------------------------------------------------
+    # Warnings
+    # --------------------------------------------------
+    
+    if (length(validation$warnings) > 0)
+    {
+      for (msg in validation$warnings)
+      {
+        showNotification(
+          msg,
+          type = "warning",
+          duration = 10
+        )
+      }
+    }
+    
+    
+    # --------------------------------------------------
+    # Store validated data and summary
+    # --------------------------------------------------
+    
+    clean_data <- validation$data
+    
+    state$dilution_summary <-
+      validation$summary
+    
+    
+    # --------------------------------------------------
+    # Legend labels
+    # --------------------------------------------------
+    
     dil_sum <- state$dilution_summary
     
-    # print(dil_sum)
+    legend_labels <- setNames(
+      paste0(
+        dil_sum$Gene,
+        ", slope=",
+        round(dil_sum$slope, 2),
+        ", E=",
+        round(dil_sum$eff, 2),
+        ", R²=",
+        round(dil_sum$r2, 3)
+      ),
+      dil_sum$Gene
+    )
     
-    leg = c()
-    for (i in 1:nrow(dil_sum))
-    {
-      g  = dil_sum[i, 1]
-      e  = dil_sum[i, 2]
-      s  = -1/log10(e)
-      ss = paste(g, ', slope=', round(s, digits = 2), ', eff=', round(e, digits = 2), sep='')
-      leg = c(leg, ss)
-    }
     
-    p <- ggplot(dil_data, aes(x=cDNA.Input, y=Cycle, col=Gene)) +
-      geom_point() + 
-      scale_x_continuous(trans='log10') + 
-      geom_smooth(method = "lm", se=F, formula = y ~ x) + 
-      xlab('cDNA Input') + ylab('Cycles') +
-      theme(legend.position = c(0.8, 0.8)) +
-      scale_color_discrete(labels=leg)
+    # --------------------------------------------------
+    # Plot
+    # --------------------------------------------------
+    
+    p <- ggplot(
+      clean_data,
+      aes(
+        x = .data[[input$dilcdnaselect]],
+        y = .data[[input$dilcpselect]],
+        color = .data[[input$dilgeneselect]]
+      )
+    ) +
+      geom_point() +
+      scale_x_log10() +
+      geom_smooth(
+        method = "lm",
+        se = FALSE,
+        formula = y ~ x
+      ) +
+      xlab("cDNA input / concentration") +
+      ylab("Ct/Cq") +
+      scale_color_discrete(
+        labels = legend_labels
+      )
+    
     
     state$dilution_plot <- p
-    # print(dil_sum)
-    # dil_sum_wide <<- dil_sum %>% spread(input$dilgeneselect, 'eff')
-    # print(dil_sum_wide)
-    # print('end')
+    
     
     enable("dilwidth")
     enable("dilheight")
     enable("dilpltfrmt")
     enable("download_dilplt")
     
+    
+    return(invisible(TRUE))
   }
+  
+  # processDil <- function()
+  # {
+  #   req(state$dilution_data)
+  #   
+  #   dil_data <- state$dilution_data
+  #   # rep_check  = input$dilrepselect != 'NA'
+  #   # tech_check = input$diltechselect != 'NA'
+  #   # cond_check = input$dilcondselect != 'NA'
+  #   # time_check = input$diltimeselect != 'NA'
+  #   
+  #   
+  #   enable("dilwidth")
+  #   enable("dilheight")
+  #   enable("dilpltfrmt")
+  #   enable("download_dilplt")
+  #   
+  # }
   
   observeEvent(ignoreInit = T, input$dilprocessb, 
                handlerExpr = {
