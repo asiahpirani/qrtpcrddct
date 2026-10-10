@@ -350,16 +350,21 @@ prepare_display_data <- function(
   return(data)
 }
 
-makeOneHeatmap = function(data,
-                          cond_select,
-                          time_select,
-                          ctrl,
-                          timectrl,
-                          addctrl,
-                          heatlog,
-                          heatgrp,
-                          heatori)
+makeOneHeatmap <- function(
+    data,
+    cond_select,
+    time_select,
+    ctrl,
+    timectrl,
+    addctrl,
+    heatlog,
+    heatori)
 {
+  
+  # --------------------------------------------------
+  # Apply control/baseline filtering
+  # --------------------------------------------------
+  
   data <- prepare_display_data(
     data = data,
     cond_select = cond_select,
@@ -369,19 +374,215 @@ makeOneHeatmap = function(data,
     hide_control = addctrl
   )
   
-  genes = unique(data$Target)
+  
+  # --------------------------------------------------
+  # Choose value to display
+  # --------------------------------------------------
+  
   if (heatlog == 2)
   {
-    val_var = 'log.mean'
+    val_var <- "log.mean"
+    heatmap_legend_title <- "log2 fold change"
   }
   else
   {
-    val_var = 'mean'
+    val_var <- "mean"
+    heatmap_legend_title <- "Fold change"
   }
-  data_mat = spread(data[, c('Target', val_var, 'Times', 'Conditions')], 
-                    key='Target', value=val_var)
-  annot = rowAnnotation(Conditions=data_mat$Conditions, Times=data_mat$Times)
-  h = Heatmap(as.matrix(data_mat[, genes]), right_annotation=annot)
+  
+  
+  genes <- unique(
+    as.character(data$Target)
+  )
+  
+  
+  # --------------------------------------------------
+  # Determine which grouping columns actually exist
+  # --------------------------------------------------
+  
+  cond_enabled <- cond_select != "NA"
+  time_enabled <- time_select != "NA"
+  
+  
+  if (!cond_enabled && !time_enabled)
+  {
+    stop(
+      "Heatmap requires at least a condition or a time dimension."
+    )
+  }
+  
+  
+  # --------------------------------------------------
+  # Both condition and time
+  # --------------------------------------------------
+  
+  if (cond_enabled && time_enabled)
+  {
+    data_mat <- spread(
+      data[
+        ,
+        c(
+          "Conditions",
+          "Times",
+          "Target",
+          val_var
+        ),
+        drop = FALSE
+      ],
+      key = "Target",
+      value = val_var
+    )
+    
+    
+    matrix_data <- as.matrix(
+      data_mat[
+        ,
+        genes,
+        drop = FALSE
+      ]
+    )
+    
+    
+    rownames(matrix_data) <- paste(
+      data_mat$Conditions,
+      data_mat$Times,
+      sep = " / "
+    )
+    
+    
+    annotation_data <- list(
+      Conditions = as.character(data_mat$Conditions),
+      Times = as.character(data_mat$Times)
+    )
+  }
+  
+  
+  # --------------------------------------------------
+  # Condition only
+  # --------------------------------------------------
+  
+  else if (cond_enabled)
+  {
+    data_mat <- spread(
+      data[
+        ,
+        c(
+          "Conditions",
+          "Target",
+          val_var
+        ),
+        drop = FALSE
+      ],
+      key = "Target",
+      value = val_var
+    )
+    
+    
+    matrix_data <- as.matrix(
+      data_mat[
+        ,
+        genes,
+        drop = FALSE
+      ]
+    )
+    
+    
+    rownames(matrix_data) <-
+      as.character(
+        data_mat$Conditions
+      )
+    
+    
+    annotation_data <- list(
+      Conditions = as.character(data_mat$Conditions)
+    )
+  }
+  
+  
+  # --------------------------------------------------
+  # Time only
+  # --------------------------------------------------
+  
+  else
+  {
+    data_mat <- spread(
+      data[
+        ,
+        c(
+          "Times",
+          "Target",
+          val_var
+        ),
+        drop = FALSE
+      ],
+      key = "Target",
+      value = val_var
+    )
+    
+    
+    matrix_data <- as.matrix(
+      data_mat[
+        ,
+        genes,
+        drop = FALSE
+      ]
+    )
+    
+    
+    rownames(matrix_data) <-
+      as.character(
+        data_mat$Times
+      )
+    
+    
+    annotation_data <- list(
+      Times = as.character(data_mat$Times)
+    )
+  }
+  
+  
+  # --------------------------------------------------
+  # Build heatmap
+  # --------------------------------------------------
+  
+  # --------------------------------------------------
+  # Heatmap orientation
+  # --------------------------------------------------
+  
+  if (as.character(heatori) == "2")
+  {
+    # Genes become rows; experimental groups become columns
+    
+    matrix_data <- t(matrix_data)
+    
+    col_annot <- do.call(
+      ComplexHeatmap::HeatmapAnnotation,
+      annotation_data
+    )
+    
+    h <- Heatmap(
+      matrix_data,
+      name = heatmap_legend_title,
+      top_annotation = col_annot
+    )
+  }
+  else
+  {
+    # Experimental groups are rows; genes are columns
+    
+    row_annot <- do.call(
+      ComplexHeatmap::rowAnnotation,
+      annotation_data
+    )
+    
+    h <- Heatmap(
+      matrix_data,
+      name = heatmap_legend_title,
+      right_annotation = row_annot
+    )
+  }
+  
+  
   return(h)
 }
 
@@ -440,12 +641,13 @@ makeOnePlot = function(
               '9'=aes(x=Times, y=!!sym(yy), fill=Conditions)       # "Conditions & Times (color by Conditions)" = 9)
               )
   
-  hh = 1
-  yl = expression(paste(Delta, Delta, 'CT'))
+  hh <- 1
+  yl <- "Relative expression (fold change)"
+  
   if (addlog == 2)
   {
-    hh = 0
-    yl = expression(paste('log ',Delta, Delta, 'CT'))
+    hh <- 0
+    yl <- expression(log[2]~"fold change")
   }
   if (addmin == 1)
   {
@@ -2805,9 +3007,17 @@ server <- function(input, output, session) {
     
     state$main_plot <- p
     
-    h = makeOneHeatmap(data, 
-                       input$condselect, input$timeselect, input$ctrlselect, input$timectrlselect,
-                       input$heatctrl, input$heatlog, input$heatgrp, input$heatori)
+    h = makeOneHeatmap(
+      data,
+      input$condselect,
+      input$timeselect,
+      input$ctrlselect,
+      input$timectrlselect,
+      input$heatctrl,
+      input$heatlog,
+      input$heatori
+    )
+    
     state$heatmap <- h
     
     
@@ -2860,7 +3070,6 @@ server <- function(input, output, session) {
     c(
       input$heatctrl,
       input$heatlog,
-      input$heatgrp,
       input$heatori
     ),
     handlerExpr = {
@@ -2875,7 +3084,6 @@ server <- function(input, output, session) {
         input$timectrlselect,
         input$heatctrl,
         input$heatlog,
-        input$heatgrp,
         input$heatori
       )
       

@@ -12,19 +12,17 @@ fluidRow(
                                choices = list("original" = 1, "log" = 2), 
                                selected = 1)
            ),
-           column(6, "",
-                  selectInput("heatgrp", 'In each panel', 
-                              c("Genes" = 1, 
-                                "Conditions" = 2,
-                                "Times" = 3,
-                                "Conditions & Genes (color by Genes)" = 4,
-                                "Conditions & Genes (color by Conditions)" = 5,
-                                "Times & Genes (color by Genes)" = 6,
-                                "Times & Genes (color by Times)" = 7,
-                                "Conditions & Times (color by Times)" = 8,
-                                "Conditions & Times (color by Conditions)" = 9)
-                  ),
-                  radioButtons("heatori", 'Plot orientation', choices = list('NULL'=0)),
+           column(
+             6, "",
+             radioButtons(
+               "heatori",
+               "Heatmap orientation",
+               choices = c(
+                 "Groups as rows" = 1,
+                 "Genes as rows" = 2
+               ),
+               selected = 1
+             )
            ),
            # actionButton('makeplotb', 'Make Plot')
          )
