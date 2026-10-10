@@ -1366,6 +1366,302 @@ validate_replicate_design <- function(
   )
 }
 
+validate_rotor_efficiency <- function(
+    data,
+    genes,
+    efficiency_columns,
+    reserved_columns = character(),
+    warning_low = 1.8,
+    warning_high = 2.2)
+{
+  errors <- character()
+  warnings <- character()
+  
+  add_error <- function(msg)
+  {
+    errors <<- c(errors, msg)
+  }
+  
+  add_warning <- function(msg)
+  {
+    warnings <<- c(warnings, msg)
+  }
+  
+  
+  eff_matrix <- matrix(
+    NA_real_,
+    nrow = nrow(data),
+    ncol = length(genes)
+  )
+  
+  colnames(eff_matrix) <- genes
+  
+  selected_eff_cols <- unlist(
+    efficiency_columns,
+    use.names = TRUE
+  )
+  
+  selected_eff_cols <- selected_eff_cols[
+    !is.na(selected_eff_cols) &
+      selected_eff_cols != ""
+  ]
+  
+  
+  # --------------------------------------------------
+  # Efficiency columns must not be Ct/metadata columns
+  # --------------------------------------------------
+  
+  reserved_used <- intersect(
+    selected_eff_cols,
+    reserved_columns
+  )
+  
+  if (length(reserved_used) > 0)
+  {
+    add_error(
+      paste0(
+        "These columns cannot be used as efficiency columns because ",
+        "they are already used as Ct/Cq or metadata columns: ",
+        paste(
+          unique(reserved_used),
+          collapse = ", "
+        ),
+        "."
+      )
+    )
+  }
+  
+  
+  # --------------------------------------------------
+  # Each gene should have its own efficiency column
+  # --------------------------------------------------
+  
+  duplicated_eff <- unique(
+    selected_eff_cols[
+      duplicated(selected_eff_cols) |
+        duplicated(
+          selected_eff_cols,
+          fromLast = TRUE
+        )
+    ]
+  )
+  
+  if (length(duplicated_eff) > 0)
+  {
+    add_error(
+      paste0(
+        "Each gene must use its own efficiency column. ",
+        "These efficiency columns were assigned to more than one gene: ",
+        paste(
+          duplicated_eff,
+          collapse = ", "
+        ),
+        "."
+      )
+    )
+  }
+  
+  
+  for (gene in genes)
+  {
+    eff_col <- efficiency_columns[[gene]]
+    
+    
+    # ---------------------------------------------
+    # Efficiency column must be selected
+    # ---------------------------------------------
+    
+    if (
+      is.null(eff_col) ||
+      length(eff_col) != 1 ||
+      is.na(eff_col) ||
+      eff_col == ""
+    )
+    {
+      add_error(
+        paste0(
+          "Please select an efficiency column for gene '",
+          gene,
+          "'."
+        )
+      )
+      
+      next
+    }
+    
+    
+    # ---------------------------------------------
+    # Selected column must exist
+    # ---------------------------------------------
+    
+    if (!(eff_col %in% colnames(data)))
+    {
+      add_error(
+        paste0(
+          "Efficiency column '",
+          eff_col,
+          "' selected for gene '",
+          gene,
+          "' does not exist in the input data."
+        )
+      )
+      
+      next
+    }
+    
+    
+    x <- data[[eff_col]]
+    
+    
+    # ---------------------------------------------
+    # Convert numeric-looking text
+    # ---------------------------------------------
+    
+    if (!is.numeric(x))
+    {
+      x_text <- trimws(
+        as.character(x)
+      )
+      
+      x_numeric <- suppressWarnings(
+        as.numeric(x_text)
+      )
+      
+      bad_text <- !is.na(x_text) &
+        x_text != "" &
+        is.na(x_numeric)
+      
+      if (any(bad_text))
+      {
+        bad_values <- unique(
+          x_text[bad_text]
+        )
+        
+        add_error(
+          paste0(
+            "Efficiency column '",
+            eff_col,
+            "' for gene '",
+            gene,
+            "' contains non-numeric value(s): ",
+            paste(
+              head(bad_values, 5),
+              collapse = ", "
+            ),
+            "."
+          )
+        )
+        
+        next
+      }
+      
+      x <- x_numeric
+    }
+    
+    
+    # ---------------------------------------------
+    # Missing / non-finite
+    # ---------------------------------------------
+    
+    bad_missing <- is.na(x) |
+      is.nan(x) |
+      !is.finite(x)
+    
+    if (any(bad_missing))
+    {
+      add_error(
+        paste0(
+          "Efficiency column '",
+          eff_col,
+          "' for gene '",
+          gene,
+          "' contains ",
+          sum(bad_missing),
+          " missing or non-finite value(s)."
+        )
+      )
+    }
+    
+    
+    # ---------------------------------------------
+    # Biological validity
+    # ---------------------------------------------
+    
+    bad_eff <- !bad_missing &
+      x <= 1
+    
+    if (any(bad_eff))
+    {
+      add_error(
+        paste0(
+          "Efficiency values for gene '",
+          gene,
+          "' must be greater than 1. ",
+          sum(bad_eff),
+          " invalid value(s) were found."
+        )
+      )
+    }
+    
+    
+    # ---------------------------------------------
+    # Unusual efficiency
+    # ---------------------------------------------
+    
+    usable <- x[
+      is.finite(x) &
+        !is.na(x) &
+        x > 1
+    ]
+    
+    if (length(usable) > 0)
+    {
+      unusual <- usable < warning_low |
+        usable > warning_high
+      
+      if (any(unusual))
+      {
+        unusual_values <- usable[unusual]
+        
+        add_warning(
+          paste0(
+            "Gene '",
+            gene,
+            "' contains ",
+            length(unusual_values),
+            " efficiency value(s) outside ",
+            warning_low,
+            "-",
+            warning_high,
+            ". Range observed: ",
+            round(min(unusual_values), 3),
+            " to ",
+            round(max(unusual_values), 3),
+            "."
+          )
+        )
+      }
+    }
+    
+    
+    if (
+      !any(bad_missing) &&
+      !any(bad_eff)
+    )
+    {
+      eff_matrix[, gene] <- x
+    }
+  }
+  
+  
+  list(
+    ok = length(errors) == 0,
+    errors = unique(errors),
+    warnings = unique(warnings),
+    eff_matrix = eff_matrix
+  )
+}
+
 # Define server logic ----
 server <- function(input, output, session) {
   # disable("makeplot")
@@ -1796,20 +2092,75 @@ server <- function(input, output, session) {
       # --------------------------------------------------
       # Efficiency validation/calculation starts here
       # --------------------------------------------------
-
-    if (input$effradio == 1)
-    {
-      for (g in all_genes())
+      rotor_validation <- NULL
+      
+      if (input$effradio == 1)
       {
-        c_check  = input[[g]] != ""
-        feedbackWarning(inputId = g,  show=!c_check,  text = "Please select the efficiency column.")
+        efficiency_columns <- setNames(
+          lapply(
+            all_genes(),
+            function(g)
+            {
+              input[[g]]
+            }
+          ),
+          all_genes()
+        )
+        
+        reserved_columns <- unique(
+          c(
+            input$repselect,
+            
+            if (is_selected_col(input$techselect))
+              input$techselect,
+            
+            if (is_selected_col(input$condselect))
+              input$condselect,
+            
+            if (is_selected_col(input$timeselect))
+              input$timeselect,
+            
+            all_genes()
+          )
+        )
+        
+        rotor_validation <- validate_rotor_efficiency(
+          data = analysis_data,
+          genes = all_genes(),
+          efficiency_columns = efficiency_columns,
+          reserved_columns = reserved_columns
+        )
+        
+        
+        if (!rotor_validation$ok)
+        {
+          for (msg in rotor_validation$errors)
+          {
+            showNotification(
+              msg,
+              type = "error",
+              duration = NULL
+            )
+          }
+          
+          return(invisible(FALSE))
+        }
+        
+        
+        if (length(rotor_validation$warnings) > 0)
+        {
+          for (msg in rotor_validation$warnings)
+          {
+            showNotification(
+              msg,
+              type = "warning",
+              duration = 10
+            )
+          }
+        }
       }
-      for (g in all_genes())
-      {
-        c_check  = input[[g]] != ""
-        req(c_check)
-      }
-    }
+      
+      
     if (input$effradio == 2)
     {
       req(state$dilution_summary)
@@ -1848,15 +2199,13 @@ server <- function(input, output, session) {
         length(all_genes())
       )
       
-      colnames(eff_matrix) <- all_genes()
+    colnames(eff_matrix) <- all_genes()
+    
     if (input$effradio == 1)
     {
-      for (g in all_genes())
-      {
-        eff_matrix[, g] <-
-          analysis_data[, input[[g]]]
-      }
+      eff_matrix <- rotor_validation$eff_matrix
     }
+    
     if (input$effradio == 2)
     {
       req(state$dilution_summary)
