@@ -1006,6 +1006,366 @@ validate_ct_values <- function(
 }
 
 
+validate_replicate_design <- function(
+    data,
+    rep_col,
+    tech_col,
+    cond_col,
+    time_col,
+    included_conditions,
+    included_times,
+    control_condition,
+    control_time)
+{
+  errors <- character()
+  warnings <- character()
+  
+  add_error <- function(msg)
+  {
+    errors <<- c(errors, msg)
+  }
+  
+  add_warning <- function(msg)
+  {
+    warnings <<- c(warnings, msg)
+  }
+  
+  
+  # --------------------------------------------------
+  # Basic setup
+  # --------------------------------------------------
+  
+  if (nrow(data) == 0)
+  {
+    add_error("No rows remain for replicate/design validation.")
+    
+    return(
+      list(
+        ok = FALSE,
+        errors = errors,
+        warnings = warnings
+      )
+    )
+  }
+  
+  cond_enabled <- is_selected_col(cond_col)
+  time_enabled <- is_selected_col(time_col)
+  tech_enabled <- is_selected_col(tech_col)
+  
+  group_cols <- c(
+    if (cond_enabled) cond_col,
+    if (time_enabled) time_col
+  )
+  
+  
+  # --------------------------------------------------
+  # Biological replicate IDs must be present
+  # --------------------------------------------------
+  
+  rep_values <- as.character(
+    data[[rep_col]]
+  )
+  
+  missing_rep <- is.na(rep_values) |
+    trimws(rep_values) == ""
+  
+  if (any(missing_rep))
+  {
+    add_error(
+      paste0(
+        "Biological replicate column '",
+        rep_col,
+        "' contains ",
+        sum(missing_rep),
+        " missing/empty value(s)."
+      )
+    )
+  }
+  
+  
+  # --------------------------------------------------
+  # Technical replicate IDs must be present
+  # --------------------------------------------------
+  
+  if (tech_enabled)
+  {
+    tech_values <- as.character(
+      data[[tech_col]]
+    )
+    
+    missing_tech <- is.na(tech_values) |
+      trimws(tech_values) == ""
+    
+    if (any(missing_tech))
+    {
+      add_error(
+        paste0(
+          "Technical replicate column '",
+          tech_col,
+          "' contains ",
+          sum(missing_tech),
+          " missing/empty value(s)."
+        )
+      )
+    }
+  }
+  
+  
+  # --------------------------------------------------
+  # Duplicate row structure
+  # --------------------------------------------------
+  
+  key_cols <- c(
+    group_cols,
+    rep_col,
+    if (tech_enabled) tech_col
+  )
+  
+  key_data <- data[
+    ,
+    key_cols,
+    drop = FALSE
+  ]
+  
+  duplicated_key <-
+    duplicated(key_data) |
+    duplicated(
+      key_data,
+      fromLast = TRUE
+    )
+  
+  if (any(duplicated_key))
+  {
+    if (tech_enabled)
+    {
+      add_error(
+        paste0(
+          "Duplicate measurements were found for the same ",
+          "condition/time, biological replicate, and technical replicate. ",
+          "Each technical replicate should appear only once within a biological sample."
+        )
+      )
+    }
+    else
+    {
+      add_error(
+        paste0(
+          "More than one row was found for the same biological replicate ",
+          "within the same condition/time group. ",
+          "If these rows are technical replicates, please select a technical replicate column."
+        )
+      )
+    }
+  }
+  
+  
+  # --------------------------------------------------
+  # All selected condition/time groups must exist
+  # --------------------------------------------------
+  
+  if (cond_enabled && time_enabled)
+  {
+    expected <- expand.grid(
+      Condition = as.character(included_conditions),
+      Time = as.character(included_times),
+      stringsAsFactors = FALSE
+    )
+    
+    actual_keys <- paste(
+      as.character(data[[cond_col]]),
+      as.character(data[[time_col]]),
+      sep = "\r"
+    )
+    
+    expected_keys <- paste(
+      expected$Condition,
+      expected$Time,
+      sep = "\r"
+    )
+    
+    missing_groups <- expected[
+      !(expected_keys %in% actual_keys),
+      ,
+      drop = FALSE
+    ]
+    
+    if (nrow(missing_groups) > 0)
+    {
+      labels <- paste(
+        missing_groups$Condition,
+        missing_groups$Time,
+        sep = " / "
+      )
+      
+      add_error(
+        paste0(
+          "No samples were found for these selected condition/time group(s): ",
+          paste(
+            head(labels, 10),
+            collapse = ", "
+          ),
+          "."
+        )
+      )
+    }
+  }
+  else if (cond_enabled)
+  {
+    missing_conditions <- setdiff(
+      as.character(included_conditions),
+      as.character(data[[cond_col]])
+    )
+    
+    if (length(missing_conditions) > 0)
+    {
+      add_error(
+        paste0(
+          "No samples were found for these selected condition(s): ",
+          paste(
+            missing_conditions,
+            collapse = ", "
+          ),
+          "."
+        )
+      )
+    }
+  }
+  else if (time_enabled)
+  {
+    missing_times <- setdiff(
+      as.character(included_times),
+      as.character(data[[time_col]])
+    )
+    
+    if (length(missing_times) > 0)
+    {
+      add_error(
+        paste0(
+          "No samples were found for these selected time point(s): ",
+          paste(
+            missing_times,
+            collapse = ", "
+          ),
+          "."
+        )
+      )
+    }
+  }
+  
+  
+  # --------------------------------------------------
+  # Calibrator group must exist
+  # --------------------------------------------------
+  
+  calibrator_rows <- rep(
+    TRUE,
+    nrow(data)
+  )
+  
+  if (cond_enabled)
+  {
+    calibrator_rows <-
+      calibrator_rows &
+      data[[cond_col]] == control_condition
+  }
+  
+  if (time_enabled)
+  {
+    calibrator_rows <-
+      calibrator_rows &
+      data[[time_col]] == control_time
+  }
+  
+  calibrator_rows[
+    is.na(calibrator_rows)
+  ] <- FALSE
+  
+  if (!any(calibrator_rows))
+  {
+    add_error(
+      "The selected control/baseline calibrator group contains no samples."
+    )
+  }
+  
+  
+  # --------------------------------------------------
+  # Number of biological replicates per group
+  # --------------------------------------------------
+  
+  unique_bio <- unique(
+    data[
+      ,
+      c(group_cols, rep_col),
+      drop = FALSE
+    ]
+  )
+  
+  if (length(group_cols) == 1)
+  {
+    group_key <- as.character(
+      unique_bio[[group_cols]]
+    )
+  }
+  else
+  {
+    group_key <- paste(
+      as.character(unique_bio[[group_cols[1]]]),
+      as.character(unique_bio[[group_cols[2]]]),
+      sep = " / "
+    )
+  }
+  
+  bio_counts <- table(group_key)
+  
+  one_rep_groups <- names(
+    bio_counts[bio_counts < 2]
+  )
+  
+  if (length(one_rep_groups) > 0)
+  {
+    add_warning(
+      paste0(
+        "Only one biological replicate is available for: ",
+        paste(
+          head(one_rep_groups, 10),
+          collapse = ", "
+        ),
+        ". SD cannot be estimated reliably for these groups."
+      )
+    )
+  }
+  
+  
+  # --------------------------------------------------
+  # Unequal biological replicate counts
+  # --------------------------------------------------
+  
+  if (length(unique(as.integer(bio_counts))) > 1)
+  {
+    add_warning(
+      paste0(
+        "The number of biological replicates differs between groups ",
+        "(range: ",
+        min(bio_counts),
+        "-",
+        max(bio_counts),
+        ")."
+      )
+    )
+  }
+  
+  
+  # --------------------------------------------------
+  # Return
+  # --------------------------------------------------
+  
+  list(
+    ok = length(errors) == 0,
+    errors = unique(errors),
+    warnings = unique(warnings)
+  )
+}
+
 # Define server logic ----
 server <- function(input, output, session) {
   # disable("makeplot")
@@ -1327,6 +1687,50 @@ server <- function(input, output, session) {
         included_conditions = input$condincselect,
         included_times = input$timeincselect
       )
+      
+      rep_validation <- validate_replicate_design(
+        data = analysis_data,
+        
+        rep_col = input$repselect,
+        tech_col = input$techselect,
+        
+        cond_col = input$condselect,
+        time_col = input$timeselect,
+        
+        included_conditions = input$condincselect,
+        included_times = input$timeincselect,
+        
+        control_condition = input$ctrlselect,
+        control_time = input$timectrlselect
+      )
+      
+      
+      if (!rep_validation$ok)
+      {
+        for (msg in rep_validation$errors)
+        {
+          showNotification(
+            msg,
+            type = "error",
+            duration = NULL
+          )
+        }
+        
+        return(invisible(FALSE))
+      }
+      
+      
+      if (length(rep_validation$warnings) > 0)
+      {
+        for (msg in rep_validation$warnings)
+        {
+          showNotification(
+            msg,
+            type = "warning",
+            duration = 10
+          )
+        }
+      }
       
       ct_validation <- validate_ct_values(
         data = data_input,
