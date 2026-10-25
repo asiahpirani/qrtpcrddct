@@ -20,6 +20,22 @@ fluidRow(
   column(12, "",
          h4('Select:'),
   ),
+  column(
+    12, "",
+    disabled(
+      radioButtons(
+        "analysismode",
+        "Analyze by",
+        choices = c(
+          "Condition & Time" = "both",
+          "Condition only" = "condition",
+          "Time only" = "time"
+        ),
+        selected = "both",
+        inline = TRUE
+      )
+    )
+  ),
   column(12, "",
         fluidRow(
           column(6, "",
@@ -27,14 +43,34 @@ fluidRow(
                  disabled(selectInput('houseselect', 'Reference genes', c(), multiple = T)),
                  disabled(selectInput("condselect", "Conditions\' column", c())), 
                  disabled(selectizeInput('condincselect', 'Conditions\' to include', c(), multiple = T, options = list(minItems = 1))),
-                 disabled(selectInput("ctrlselect", "Control condition", choices = c(""), selected = ""))
+                 conditionalPanel(
+                   condition = "input.analysismode != 'time'",
+                   disabled(
+                     selectInput(
+                       "ctrlselect",
+                       "Control condition",
+                       choices = c(""),
+                       selected = ""
+                     )
+                   )
+                 )
           ),
           column(6, "", # offset = 2, 
                  disabled(selectInput("techselect", "Technical replicates\' column", c())),
                  disabled(selectInput('geneselect', 'Target genes', c(), multiple = T)),
                  disabled(selectInput("timeselect", "Time points\' column", c())), 
                  disabled(selectizeInput('timeincselect', 'Time points\' to include', c(), multiple = T, options = list(minItems = 1))),
-                 disabled(selectInput("timectrlselect", "T0 Time point", choices = c(""), selected = ""))
+                 conditionalPanel(
+                   condition = "input.analysismode != 'condition'",
+                   disabled(
+                     selectInput(
+                       "timectrlselect",
+                       "T0 Time point",
+                       choices = c(""),
+                       selected = ""
+                     )
+                   )
+                 )
           )
         )
     ),

@@ -304,6 +304,665 @@ makeDeltaDelta = function(data, cond_col, uconditions, times_col, utimes, rep_co
   return(res_agg)
 }
 
+prepare_pca_data <- function(
+    data,
+    cond_col,
+    time_col,
+    rep_col,
+    tech_col,
+    ctrl,
+    timecntrl,
+    housekeeping,
+    targets,
+    eff_matrix)
+{
+  # --------------------------------------------------
+  # Geometric mean
+  # --------------------------------------------------
+  
+  g_mean <- function(x)
+  {
+    x <- as.numeric(x)
+    
+    if (
+      length(x) == 0 ||
+      any(!is.finite(x)) ||
+      any(x <= 0)
+    )
+    {
+      stop(
+        "Cannot calculate PCA input: expression values must be finite and greater than zero."
+      )
+    }
+    
+    exp(
+      mean(
+        log(x)
+      )
+    )
+  }
+  
+  
+  all_genes <- unique(
+    c(
+      housekeeping,
+      targets
+    )
+  )
+  
+  
+  # --------------------------------------------------
+  # Basic checks
+  # --------------------------------------------------
+  
+  if (nrow(eff_matrix) != nrow(data))
+  {
+    stop(
+      "PCA input preparation failed: efficiency matrix and analysis data have different numbers of rows."
+    )
+  }
+  
+  
+  missing_eff_genes <- setdiff(
+    all_genes,
+    colnames(eff_matrix)
+  )
+  
+  if (length(missing_eff_genes) > 0)
+  {
+    stop(
+      paste0(
+        "PCA input preparation failed: efficiency values are missing for: ",
+        paste(
+          missing_eff_genes,
+          collapse = ", "
+        ),
+        "."
+      )
+    )
+  }
+  
+  
+  pca_data <- data
+  
+  
+  # --------------------------------------------------
+  # Convert Ct/Cq to amplification-adjusted quantity
+  # --------------------------------------------------
+  
+  for (gene in all_genes)
+  {
+    pca_data[[gene]] <-
+      eff_matrix[, gene]^pca_data[[gene]]
+  }
+  
+  
+  # --------------------------------------------------
+  # Collapse technical replicates
+  #
+  # Biological replicates remain separate PCA samples.
+  # --------------------------------------------------
+  
+  if (is_selected_col(tech_col))
+  {
+    group_names <- c(
+      if (is_selected_col(cond_col))
+        cond_col,
+      
+      if (is_selected_col(time_col))
+        time_col,
+      
+      rep_col
+    )
+    
+    
+    pca_data <- pca_data %>%
+      group_by(
+        across(
+          all_of(group_names)
+        )
+      ) %>%
+      summarise(
+        across(
+          all_of(all_genes),
+          g_mean
+        ),
+        .groups = "drop"
+      ) %>%
+      as.data.frame()
+  }
+  
+  
+  # --------------------------------------------------
+  # Reference-gene normalization
+  # --------------------------------------------------
+  
+  if (length(housekeeping) == 1)
+  {
+    hk <- pca_data[[housekeeping]]
+  }
+  else
+  {
+    hk <- apply(
+      pca_data[
+        ,
+        housekeeping,
+        drop = FALSE
+      ],
+      1,
+      g_mean
+    )
+  }
+  
+  
+  target_values <- as.data.frame(
+    pca_data[
+      ,
+      targets,
+      drop = FALSE
+    ]
+  )
+  
+  
+  normalized <- sweep(
+    target_values,
+    1,
+    hk,
+    "/"
+  )
+  
+  
+  # --------------------------------------------------
+  # Identify calibrator samples
+  # --------------------------------------------------
+  
+  calibrator <- rep(
+    TRUE,
+    nrow(pca_data)
+  )
+  
+  
+  if (is_selected_col(cond_col))
+  {
+    calibrator <-
+      calibrator &
+      pca_data[[cond_col]] == ctrl
+  }
+  
+  
+  if (is_selected_col(time_col))
+  {
+    calibrator <-
+      calibrator &
+      pca_data[[time_col]] == timecntrl
+  }
+  
+  
+  calibrator[
+    is.na(calibrator)
+  ] <- FALSE
+  
+  
+  if (!any(calibrator))
+  {
+    stop(
+      "PCA input preparation failed: no calibrator samples were found."
+    )
+  }
+  
+  
+  # --------------------------------------------------
+  # Relative expression for each biological sample
+  # --------------------------------------------------
+  
+  relative_expression <- matrix(
+    NA_real_,
+    nrow = nrow(pca_data),
+    ncol = length(targets)
+  )
+  
+  colnames(relative_expression) <- targets
+  
+  
+  for (gene in targets)
+  {
+    calibrator_mean <- g_mean(
+      normalized[
+        calibrator,
+        gene
+      ]
+    )
+    
+    
+    relative_expression[, gene] <-
+      calibrator_mean /
+      normalized[, gene]
+  }
+  
+  
+  # --------------------------------------------------
+  # PCA will use log2 relative expression
+  # --------------------------------------------------
+  
+  pca_matrix <- log2(
+    relative_expression
+  )
+  
+  
+  if (any(!is.finite(pca_matrix)))
+  {
+    stop(
+      "PCA input contains non-finite log2 relative-expression values."
+    )
+  }
+  
+  
+  # --------------------------------------------------
+  # Sample metadata
+  # --------------------------------------------------
+  
+  sample_columns <- c(
+    if (is_selected_col(cond_col))
+      cond_col,
+    
+    if (is_selected_col(time_col))
+      time_col,
+    
+    rep_col
+  )
+  
+  
+  sample_names <- apply(
+    pca_data[
+      ,
+      sample_columns,
+      drop = FALSE
+    ],
+    1,
+    paste,
+    collapse = " / "
+  )
+  
+  
+  if (anyDuplicated(sample_names))
+  {
+    stop(
+      "PCA sample labels are not unique."
+    )
+  }
+  
+  
+  metadata <- data.frame(
+    Sample = sample_names,
+    stringsAsFactors = FALSE
+  )
+  
+  
+  if (is_selected_col(cond_col))
+  {
+    metadata$Conditions <-
+      as.character(
+        pca_data[[cond_col]]
+      )
+  }
+  
+  
+  if (is_selected_col(time_col))
+  {
+    metadata$Times <-
+      as.character(
+        pca_data[[time_col]]
+      )
+  }
+  
+  
+  metadata$Replicate <-
+    as.character(
+      pca_data[[rep_col]]
+    )
+  
+  
+  rownames(pca_matrix) <- sample_names
+  
+  
+  # --------------------------------------------------
+  # Return
+  # --------------------------------------------------
+  
+  list(
+    matrix = pca_matrix,
+    metadata = metadata
+  )
+}
+
+make_pca_plot <- function(pca_data)
+{
+  warnings <- character()
+  
+  add_warning <- function(msg)
+  {
+    warnings <<- c(
+      warnings,
+      msg
+    )
+  }
+  
+  
+  # --------------------------------------------------
+  # Basic input checks
+  # --------------------------------------------------
+  
+  if (
+    is.null(pca_data) ||
+    is.null(pca_data$matrix) ||
+    is.null(pca_data$metadata)
+  )
+  {
+    return(
+      list(
+        ok = FALSE,
+        message = "PCA input data are not available.",
+        warnings = warnings,
+        plot = NULL,
+        fit = NULL
+      )
+    )
+  }
+  
+  
+  x <- as.matrix(
+    pca_data$matrix
+  )
+  
+  metadata <- pca_data$metadata
+  
+  
+  # --------------------------------------------------
+  # Need enough biological samples
+  # --------------------------------------------------
+  
+  if (nrow(x) < 3)
+  {
+    return(
+      list(
+        ok = FALSE,
+        message = paste0(
+          "PCA requires at least three biological samples. ",
+          nrow(x),
+          " sample(s) are available."
+        ),
+        warnings = warnings,
+        plot = NULL,
+        fit = NULL
+      )
+    )
+  }
+  
+  
+  # --------------------------------------------------
+  # Need at least two target genes
+  # --------------------------------------------------
+  
+  if (ncol(x) < 2)
+  {
+    return(
+      list(
+        ok = FALSE,
+        message = paste0(
+          "PCA requires at least two target genes. ",
+          ncol(x),
+          " target gene(s) are available."
+        ),
+        warnings = warnings,
+        plot = NULL,
+        fit = NULL
+      )
+    )
+  }
+  
+  
+  # --------------------------------------------------
+  # Remove zero-variance genes
+  # --------------------------------------------------
+  
+  gene_variance <- apply(
+    x,
+    2,
+    var
+  )
+  
+  
+  keep_genes <-
+    is.finite(gene_variance) &
+    gene_variance > 0
+  
+  
+  dropped_genes <- colnames(x)[
+    !keep_genes
+  ]
+  
+  
+  if (length(dropped_genes) > 0)
+  {
+    add_warning(
+      paste0(
+        "PCA excluded target gene(s) with zero variance across samples: ",
+        paste(
+          dropped_genes,
+          collapse = ", "
+        ),
+        "."
+      )
+    )
+  }
+  
+  
+  x <- x[
+    ,
+    keep_genes,
+    drop = FALSE
+  ]
+  
+  
+  if (ncol(x) < 2)
+  {
+    return(
+      list(
+        ok = FALSE,
+        message = paste0(
+          "PCA requires at least two target genes with non-zero ",
+          "variation across biological samples."
+        ),
+        warnings = warnings,
+        plot = NULL,
+        fit = NULL
+      )
+    )
+  }
+  
+  
+  # --------------------------------------------------
+  # PCA
+  #
+  # Variables are already on the same log2 fold-change
+  # scale, so center genes but do not standardize them
+  # to unit variance.
+  # --------------------------------------------------
+  
+  fit <- prcomp(
+    x,
+    center = TRUE,
+    scale. = FALSE
+  )
+  
+  
+  explained_variance <-
+    fit$sdev^2 /
+    sum(fit$sdev^2)
+  
+  
+  if (
+    length(explained_variance) < 2 ||
+    !is.finite(explained_variance[2]) ||
+    explained_variance[2] <= .Machine$double.eps
+  )
+  {
+    return(
+      list(
+        ok = FALSE,
+        message = paste0(
+          "The PCA has fewer than two informative principal components. ",
+          "The selected target genes may be too highly correlated or ",
+          "contain too little independent variation."
+        ),
+        warnings = warnings,
+        plot = NULL,
+        fit = fit
+      )
+    )
+  }
+  
+  
+  # --------------------------------------------------
+  # PCA scores + metadata
+  # --------------------------------------------------
+  
+  scores <- data.frame(
+    Sample = rownames(x),
+    
+    PC1 = fit$x[, 1],
+    PC2 = fit$x[, 2],
+    
+    stringsAsFactors = FALSE
+  )
+  
+  
+  metadata_order <- match(
+    scores$Sample,
+    metadata$Sample
+  )
+  
+  
+  scores <- cbind(
+    metadata[
+      metadata_order,
+      ,
+      drop = FALSE
+    ],
+    
+    PC1 = scores$PC1,
+    PC2 = scores$PC2
+  )
+  
+  
+  # --------------------------------------------------
+  # Plot
+  # --------------------------------------------------
+  
+  has_condition <-
+    "Conditions" %in% colnames(scores)
+  
+  has_time <-
+    "Times" %in% colnames(scores)
+  
+  
+  if (has_condition && has_time)
+  {
+    p <- ggplot(
+      scores,
+      aes(
+        x = PC1,
+        y = PC2,
+        color = Conditions,
+        shape = Times
+      )
+    ) +
+      geom_point(
+        size = 3
+      )
+  }
+  else if (has_condition)
+  {
+    p <- ggplot(
+      scores,
+      aes(
+        x = PC1,
+        y = PC2,
+        color = Conditions
+      )
+    ) +
+      geom_point(
+        size = 3
+      )
+  }
+  else if (has_time)
+  {
+    p <- ggplot(
+      scores,
+      aes(
+        x = PC1,
+        y = PC2,
+        color = Times
+      )
+    ) +
+      geom_point(
+        size = 3
+      )
+  }
+  else
+  {
+    p <- ggplot(
+      scores,
+      aes(
+        x = PC1,
+        y = PC2
+      )
+    ) +
+      geom_point(
+        size = 3
+      )
+  }
+  
+  
+  p <- p +
+    xlab(
+      paste0(
+        "PC1 (",
+        round(
+          100 * explained_variance[1],
+          1
+        ),
+        "%)"
+      )
+    ) +
+    ylab(
+      paste0(
+        "PC2 (",
+        round(
+          100 * explained_variance[2],
+          1
+        ),
+        "%)"
+      )
+    ) +
+    ggtitle(
+      "PCA of log2 relative expression"
+    )
+  
+  
+  list(
+    ok = TRUE,
+    message = NULL,
+    warnings = unique(warnings),
+    plot = p,
+    fit = fit,
+    scores = scores,
+    used_genes = colnames(x),
+    dropped_genes = dropped_genes
+  )
+}
+
+
 prepare_display_data <- function(
     data,
     cond_select,
@@ -540,6 +1199,100 @@ makeOneHeatmap <- function(
     )
   }
   
+  # --------------------------------------------------
+  # Format heatmap legend values
+  # --------------------------------------------------
+  
+  finite_values <- as.numeric(matrix_data)
+  
+  finite_values <- finite_values[
+    is.finite(finite_values)
+  ]
+  
+  
+  if (length(finite_values) == 0)
+  {
+    stop(
+      "Heatmap contains no finite values."
+    )
+  }
+  
+  
+  value_range <- range(
+    finite_values
+  )
+  
+  
+  range_tolerance <-
+    sqrt(.Machine$double.eps) *
+    max(
+      1,
+      abs(value_range)
+    )
+  
+  
+  if (
+    value_range[2] - value_range[1] <=
+    range_tolerance
+  )
+  {
+    # Effectively a single value, e.g.
+    # 0.999999999999999 should display as 1.
+    
+    legend_at <- mean(
+      value_range
+    )
+  }
+  else
+  {
+    legend_at <- pretty(
+      value_range,
+      n = 5
+    )
+    
+    
+    legend_at <- legend_at[
+      legend_at >= value_range[1] &
+        legend_at <= value_range[2]
+    ]
+    
+    
+    if (length(legend_at) < 2)
+    {
+      legend_at <- value_range
+    }
+  }
+  
+  
+  legend_labels <- vapply(
+    legend_at,
+    
+    function(x)
+    {
+      if (
+        abs(x) <
+        sqrt(.Machine$double.eps)
+      )
+      {
+        x <- 0
+      }
+      
+      
+      format(
+        signif(x, 4),
+        trim = TRUE,
+        scientific = FALSE
+      )
+    },
+    
+    character(1)
+  )
+  
+  
+  heatmap_legend_param <- list(
+    at = legend_at,
+    labels = legend_labels
+  )
   
   # --------------------------------------------------
   # Build heatmap
@@ -563,7 +1316,8 @@ makeOneHeatmap <- function(
     h <- Heatmap(
       matrix_data,
       name = heatmap_legend_title,
-      top_annotation = col_annot
+      top_annotation = col_annot,
+      heatmap_legend_param = heatmap_legend_param
     )
   }
   else
@@ -578,7 +1332,8 @@ makeOneHeatmap <- function(
     h <- Heatmap(
       matrix_data,
       name = heatmap_legend_title,
-      right_annotation = row_annot
+      right_annotation = row_annot,
+      heatmap_legend_param = heatmap_legend_param
     )
   }
   
@@ -609,6 +1364,49 @@ makeOnePlot = function(
     timectrl = timectrl,
     hide_control = addctrl
   )
+  
+  # --------------------------------------------------
+  # Compact labels for Condition × Time facet panels
+  # --------------------------------------------------
+  
+  if (
+    cond_select != "NA" &&
+    time_select != "NA"
+  )
+  {
+    data$FacetConditionTime <- paste(
+      data$Conditions,
+      data$Times,
+      sep = " / "
+    )
+    wrap_facet_label <- function(x, width = 16)
+    {
+      vapply(
+        as.character(x),
+        function(label)
+        {
+          paste(
+            strwrap(
+              label,
+              width = width
+            ),
+            collapse = "\n"
+          )
+        },
+        character(1)
+      )
+    }
+    
+    
+    data$FacetTimeCondition <- paste(
+      data$Times,
+      wrap_facet_label(
+        data$Conditions,
+        width = 16
+      ),
+      sep = "\n"
+    )
+  }
   
   if (addlog == 2)
   {
@@ -685,8 +1483,32 @@ makeOnePlot = function(
     # c('Target x Times'=3, 'Times x Target'=4)
     # c('Conditions x Target'=5, 'Target x Conditions'=6)
     gg = switch(plotori,
-                '1'=facet_grid(vars(Conditions), vars(Times)),
-                '2'=facet_grid(vars(Times), vars(Conditions)),
+                '1' = facet_grid(
+                  vars(Conditions),
+                  vars(Times),
+                  labeller = labeller(
+                    Conditions = function(x)
+                    {
+                      wrap_facet_label(
+                        x,
+                        width = 16
+                      )
+                    }
+                  )
+                ),
+                '2' = facet_grid(
+                  vars(Times),
+                  vars(Conditions),
+                  labeller = labeller(
+                    Conditions = function(x)
+                    {
+                      wrap_facet_label(
+                        x,
+                        width = 16
+                      )
+                    }
+                  )
+                ),
                 '3'=facet_grid(vars(Target), vars(Times)),
                 '4'=facet_grid(vars(Times), vars(Target)),
                 '5'=facet_grid(vars(Conditions), vars(Target)),
@@ -697,7 +1519,67 @@ makeOnePlot = function(
   p = switch(paste(addgrp, cond_time_cnt),
              "1 1" = p+facet_wrap(~Conditions), # "Genes" = 1, 
              "1 2" = p+facet_wrap(~Times),      # "Genes" = 1, 
-             "1 3" = p+gg,                      # "Genes" = 1, 
+             "1 3" = {
+               
+               if (addctrl == 2)
+               {
+                 # The calibrator Condition × Time combination
+                 # has been removed from the data.
+                 #
+                 # facet_grid() would still reserve an empty
+                 # panel for that missing combination, so use
+                 # facet_wrap() to show only groups that
+                 # actually remain in the data.
+                 
+                 if (as.character(plotori) == "1")
+                 {
+                   p +
+                     facet_wrap(
+                       vars(FacetConditionTime),
+                       ncol = length(
+                         unique(
+                           as.character(data$Times)
+                         )
+                       ),
+                       drop = TRUE
+                     ) +
+                     theme(
+                       strip.text = element_text(
+                         size = 8,
+                         lineheight = 0.9
+                       )
+                     )
+      
+                 }
+                 else
+                 {
+                   p +
+                     facet_wrap(
+                       vars(FacetTimeCondition),
+                       ncol = length(
+                         unique(
+                           as.character(data$Conditions)
+                         )
+                       ),
+                       drop = TRUE
+                     ) +
+                     theme(
+                       strip.text = element_text(
+                         size = 8,
+                         lineheight = 0.9
+                       )
+                     )
+                 }
+               }
+               else
+               {
+                 # When the calibrator is shown, retain the
+                 # original rectangular Condition × Time grid.
+                 
+                 p + gg
+               }
+               
+             },
              "2 1" = p+facet_wrap(~Target),     # "Conditions" = 2,
              "2 2" = p,                         # "Conditions" = 2, # shouldn't happen
              "2 3" = p+gg,                      # "Conditions" = 2,
@@ -723,6 +1605,21 @@ makeOnePlot = function(
              "9 2" = p,                         # "Conditions & Times (color by Conditions)" = 9) # shouldn't happen
              "9 3" = p+facet_wrap(~Target),     # "Conditions & Times (color by Conditions)" = 9)
              )
+  if (
+    cond_time_cnt == 3 &&
+    as.character(plotori) == "1" &&
+    addctrl != 2
+  )
+  {
+    p <- p +
+      theme(
+        strip.text.y = element_text(
+          angle = 0,
+          size = 8,
+          lineheight = 0.9
+        )
+      )
+  }
 
   p = p +
     ylab(yl) + xlab('') +
@@ -743,6 +1640,170 @@ is_selected_col <- function(x)
     x != "NA"
 }
 
+resolve_analysis_mode <- function(
+    mode,
+    cond_col,
+    time_col,
+    included_conditions,
+    included_times)
+{
+  errors <- character()
+  
+  add_error <- function(msg)
+  {
+    errors <<- c(errors, msg)
+  }
+  
+  
+  cond_selected <- is_selected_col(cond_col)
+  time_selected <- is_selected_col(time_col)
+  
+  
+  analysis_cond_col <- "NA"
+  analysis_time_col <- "NA"
+  
+  
+  # --------------------------------------------------
+  # Validate analysis mode
+  # --------------------------------------------------
+  
+  if (
+    is.null(mode) ||
+    length(mode) != 1 ||
+    !(mode %in% c("both", "condition", "time"))
+  )
+  {
+    add_error(
+      "Please select a valid analysis mode."
+    )
+    
+    return(
+      list(
+        ok = FALSE,
+        errors = errors,
+        cond_col = analysis_cond_col,
+        time_col = analysis_time_col
+      )
+    )
+  }
+  
+  
+  # --------------------------------------------------
+  # Condition + Time
+  # --------------------------------------------------
+  
+  if (mode == "both")
+  {
+    if (!cond_selected)
+    {
+      add_error(
+        "Condition & Time analysis requires a condition column."
+      )
+    }
+    
+    if (!time_selected)
+    {
+      add_error(
+        "Condition & Time analysis requires a time column."
+      )
+    }
+    
+    if (cond_selected)
+    {
+      analysis_cond_col <- cond_col
+    }
+    
+    if (time_selected)
+    {
+      analysis_time_col <- time_col
+    }
+  }
+  
+  
+  # --------------------------------------------------
+  # Condition only
+  # --------------------------------------------------
+  
+  else if (mode == "condition")
+  {
+    if (!cond_selected)
+    {
+      add_error(
+        "Condition-only analysis requires a condition column."
+      )
+    }
+    else
+    {
+      analysis_cond_col <- cond_col
+    }
+    
+    
+    # If a time column is present, Time acts only as a filter.
+    # Exactly one time point must therefore be selected.
+    if (time_selected)
+    {
+      if (
+        is.null(included_times) ||
+        length(included_times) != 1
+      )
+      {
+        add_error(
+          paste0(
+            "When analysing by condition only, select exactly one ",
+            "time point to use as a filter."
+          )
+        )
+      }
+    }
+  }
+  
+  
+  # --------------------------------------------------
+  # Time only
+  # --------------------------------------------------
+  
+  else if (mode == "time")
+  {
+    if (!time_selected)
+    {
+      add_error(
+        "Time-only analysis requires a time column."
+      )
+    }
+    else
+    {
+      analysis_time_col <- time_col
+    }
+    
+    
+    # If a condition column is present, Condition acts only as a filter.
+    # Exactly one condition must therefore be selected.
+    if (cond_selected)
+    {
+      if (
+        is.null(included_conditions) ||
+        length(included_conditions) != 1
+      )
+      {
+        add_error(
+          paste0(
+            "When analysing by time only, select exactly one ",
+            "condition to use as a filter."
+          )
+        )
+      }
+    }
+  }
+  
+  
+  list(
+    ok = length(errors) == 0,
+    errors = unique(errors),
+    cond_col = analysis_cond_col,
+    time_col = analysis_time_col
+  )
+}
+
 validate_design_inputs <- function(
     data,
     rep_col,
@@ -754,7 +1815,9 @@ validate_design_inputs <- function(
     included_conditions,
     included_times,
     control_condition,
-    control_time)
+    control_time,
+    analysis_cond_col,
+    analysis_time_col)
 {
   errors <- character()
   
@@ -795,6 +1858,9 @@ validate_design_inputs <- function(
   cond_enabled <- is_selected_col(cond_col)
   time_enabled <- is_selected_col(time_col)
   tech_enabled <- is_selected_col(tech_col)
+  cond_is_analysis <- is_selected_col(analysis_cond_col)
+  time_is_analysis <- is_selected_col(analysis_time_col
+  )
   
   if (!cond_enabled && !time_enabled)
   {
@@ -914,20 +1980,30 @@ validate_design_inputs <- function(
   
   if (cond_enabled)
   {
-    if (is.null(included_conditions) ||
-        length(included_conditions) == 0)
+    if (
+      is.null(included_conditions) ||
+      length(included_conditions) == 0
+    )
     {
-      add_error("Please select at least one condition to include.")
+      add_error(
+        "Please select at least one condition to include."
+      )
     }
     
-    if (is.null(control_condition) ||
-        control_condition == "")
+    if (cond_is_analysis)
     {
-      add_error("Please select a control condition.")
-    }
-    else
-    {
-      if (!(control_condition %in% included_conditions))
+      if (
+        is.null(control_condition) ||
+        control_condition == ""
+      )
+      {
+        add_error(
+          "Please select a control condition."
+        )
+      }
+      else if (
+        !(control_condition %in% included_conditions)
+      )
       {
         add_error(
           "The control condition must be included in the selected conditions."
@@ -943,20 +2019,30 @@ validate_design_inputs <- function(
   
   if (time_enabled)
   {
-    if (is.null(included_times) ||
-        length(included_times) == 0)
+    if (
+      is.null(included_times) ||
+      length(included_times) == 0
+    )
     {
-      add_error("Please select at least one time point to include.")
+      add_error(
+        "Please select at least one time point to include."
+      )
     }
     
-    if (is.null(control_time) ||
-        control_time == "")
+    if (time_is_analysis)
     {
-      add_error("Please select the baseline/T0 time point.")
-    }
-    else
-    {
-      if (!(control_time %in% included_times))
+      if (
+        is.null(control_time) ||
+        control_time == ""
+      )
+      {
+        add_error(
+          "Please select the baseline/T0 time point."
+        )
+      }
+      else if (
+        !(control_time %in% included_times)
+      )
       {
         add_error(
           "The baseline/T0 time point must be included in the selected time points."
@@ -2355,7 +3441,14 @@ server <- function(input, output, session) {
     processed_data   = NULL,
     main_plot        = NULL,
     heatmap           = NULL,
-    dilution_plot    = NULL
+    dilution_plot    = NULL,
+    
+    pca_data         = NULL,
+    pca_plot         = NULL,
+    pca_scores       = NULL,
+    
+    analysis_cond_col = NULL,
+    analysis_time_col = NULL
   )
   output$diltabres <- renderTable({
     req(state$dilution_data)
@@ -2376,6 +3469,36 @@ server <- function(input, output, session) {
     req(state$heatmap)
     ComplexHeatmap::draw(state$heatmap)
   }, res = 96)
+  
+  output$pcaplot <- renderPlot({
+    req(state$pca_plot)
+    print(state$pca_plot)
+  }, res = 96)
+  
+  observe({
+    
+    if (is.null(state$pca_plot))
+    {
+      hideElement(
+        id = "pca_section"
+      )
+      
+      hideElement(
+        id = "pca_download_section"
+      )
+    }
+    else
+    {
+      showElement(
+        id = "pca_section"
+      )
+      
+      showElement(
+        id = "pca_download_section"
+      )
+    }
+    
+  })
   
   
   hideTab(inputId = 'mainpagetab', target = plot_tab_title)
@@ -2483,6 +3606,7 @@ server <- function(input, output, session) {
     enable("timeincselect")
     enable("ctrlselect")
     enable("timectrlselect")
+    enable("analysismode")
     enable('effradio')
     
     loadeddata
@@ -2673,6 +3797,59 @@ server <- function(input, output, session) {
     {
       data_input <- my_tab()
       req(data_input)
+      # --------------------------------------------------
+      # Invalidate results from any previous analysis
+      # --------------------------------------------------
+      
+      state$processed_data <- NULL
+      state$main_plot <- NULL
+      state$heatmap <- NULL
+      
+      state$pca_data <- NULL
+      state$pca_plot <- NULL
+      state$pca_scores <- NULL
+      
+      state$analysis_cond_col <- NULL
+      state$analysis_time_col <- NULL
+      
+      
+      hideTab(
+        inputId = "mainpagetab",
+        target = plot_tab_title
+      )
+      
+      hideTab(
+        inputId = "mainpagetab",
+        target = heatmap_tab_title
+      )
+      mode_info <- resolve_analysis_mode(
+        mode = input$analysismode,
+        
+        cond_col = input$condselect,
+        time_col = input$timeselect,
+        
+        included_conditions = input$condincselect,
+        included_times = input$timeincselect
+      )
+      
+      
+      if (!mode_info$ok)
+      {
+        for (msg in mode_info$errors)
+        {
+          showNotification(
+            msg,
+            type = "error",
+            duration = NULL
+          )
+        }
+        
+        return(invisible(FALSE))
+      }
+      
+      
+      analysis_cond_col <- mode_info$cond_col
+      analysis_time_col <- mode_info$time_col
       
       validation <- validate_design_inputs(
         data = data_input,
@@ -2690,7 +3867,10 @@ server <- function(input, output, session) {
         included_times = input$timeincselect,
         
         control_condition = input$ctrlselect,
-        control_time = input$timectrlselect
+        control_time = input$timectrlselect,
+        
+        analysis_cond_col = analysis_cond_col,
+        analysis_time_col = analysis_time_col
       )
       
       if (!validation$ok)
@@ -2723,8 +3903,8 @@ server <- function(input, output, session) {
         rep_col = input$repselect,
         tech_col = input$techselect,
         
-        cond_col = input$condselect,
-        time_col = input$timeselect,
+        cond_col = analysis_cond_col,
+        time_col = analysis_time_col,
         
         included_conditions = input$condincselect,
         included_times = input$timeincselect,
@@ -2894,35 +4074,74 @@ server <- function(input, output, session) {
       }
       
       
-    if (input$effradio == 2)
-    {
-      req(state$dilution_summary)
+      dil_sum <- NULL
       
-      dil_sum <- state$dilution_summary
-      
-      for (g in all_genes())
+      if (input$effradio == 2)
       {
-        c_check <- sum(dil_sum[, 1] == g) == 1
+        # --------------------------------------------------
+        # Dilution-method efficiency must already exist
+        # --------------------------------------------------
         
-        if (!c_check)
+        if (
+          is.null(state$dilution_summary) ||
+          nrow(state$dilution_summary) == 0
+        )
         {
           showNotification(
-            paste(
-              "Dilution method efficiency is not provided for ",
-              g,
-              sep = ""
+            paste0(
+              "Dilution Method was selected, but no processed standard curve ",
+              "is available. Please load and process the dilution-curve data first."
             ),
-            type = "error"
+            type = "error",
+            duration = NULL
+          )
+          
+          return(
+            invisible(FALSE)
+          )
+        }
+        
+        
+        dil_sum <- state$dilution_summary
+        
+        
+        # --------------------------------------------------
+        # Every selected gene needs an efficiency
+        # --------------------------------------------------
+        
+        available_eff_genes <-
+          as.character(
+            dil_sum$Gene
+          )
+        
+        
+        missing_eff_genes <- setdiff(
+          all_genes(),
+          available_eff_genes
+        )
+        
+        
+        if (length(missing_eff_genes) > 0)
+        {
+          showNotification(
+            paste0(
+              "Dilution-method efficiency is missing for: ",
+              paste(
+                missing_eff_genes,
+                collapse = ", "
+              ),
+              ". Please process a standard curve containing all selected ",
+              "reference and target genes."
+            ),
+            type = "error",
+            duration = NULL
+          )
+          
+          return(
+            invisible(FALSE)
           )
         }
       }
-      
-      for (g in all_genes())
-      {
-        c_check <- sum(dil_sum[, 1] == g) == 1
-        req(c_check)
-      }
-    }
     
       eff <- 2
       
@@ -2941,25 +4160,98 @@ server <- function(input, output, session) {
     
     if (input$effradio == 2)
     {
-      req(state$dilution_summary)
-      
-      dil_sum <- state$dilution_summary
-      
       for (g in all_genes())
       {
         eff_matrix[, g] <-
-          state$dilution_summary[
-            state$dilution_summary[, 1] == g,
+          dil_sum[
+            dil_sum$Gene == g,
             "eff"
           ]
       }
     }
     
-    data = makeDeltaDelta(analysis_data, input$condselect, input$condincselect, input$timeselect, input$timeincselect,
-                          input$repselect, input$techselect,
-                          input$ctrlselect, input$timectrlselect,
-                          input$houseselect, input$geneselect,
-                          eff_matrix)
+    
+    state$pca_data <- NULL
+    state$pca_plot <- NULL
+    state$pca_scores <- NULL
+
+    pca_result <- tryCatch(
+      {
+        state$pca_data <- prepare_pca_data(
+          data = analysis_data,
+          
+          cond_col = analysis_cond_col,
+          time_col = analysis_time_col,
+          
+          rep_col = input$repselect,
+          tech_col = input$techselect,
+          
+          ctrl = input$ctrlselect,
+          timecntrl = input$timectrlselect,
+          
+          housekeeping = input$houseselect,
+          targets = input$geneselect,
+          
+          eff_matrix = eff_matrix
+        )
+        
+        
+        make_pca_plot(
+          state$pca_data
+        )
+      },
+      
+      error = function(e)
+      {
+        list(
+          ok = FALSE,
+          
+          message = paste0(
+            "PCA could not be calculated: ",
+            conditionMessage(e)
+          ),
+          
+          warnings = character(),
+          plot = NULL
+        )
+      }
+    )
+    
+    
+    if (!pca_result$ok)
+    {
+      state$pca_plot <- NULL
+      state$pca_scores <- NULL
+      
+      showNotification(
+        pca_result$message,
+        type = "warning",
+        duration = 10
+      )
+    }
+    else
+    {
+      state$pca_plot <-
+        pca_result$plot
+      
+      state$pca_scores <-
+        pca_result$scores
+    }
+    
+    
+    if (length(pca_result$warnings) > 0)
+    {
+      for (msg in pca_result$warnings)
+      {
+        showNotification(
+          msg,
+          type = "warning",
+          duration = 10
+        )
+      }
+    }
+    
+    
     
     
     # list("Genes" = 1, 
@@ -2972,53 +4264,210 @@ server <- function(input, output, session) {
     #      "Conditions & Times (color by Times)" = 8,
     #      "Conditions & Times (color by Conditions)" = 9)
     plotgrp = list("Genes" = 1)
-    if (input$condselect != "NA")
+    
+    if (is_selected_col(analysis_cond_col))
     {
-      plotgrp = append(plotgrp, list("Conditions" = 2))
+      plotgrp = append(
+        plotgrp,
+        list("Conditions" = 2)
+      )
     }
-    if (input$timeselect != "NA")
+    
+    if (is_selected_col(analysis_time_col))
     {
-      plotgrp = append(plotgrp, list("Times" = 3))
+      plotgrp = append(
+        plotgrp,
+        list("Times" = 3)
+      )
     }
-    if (input$condselect != "NA")
+    
+    if (is_selected_col(analysis_cond_col))
     {
-      plotgrp = append(plotgrp, list("Conditions & Genes (color by Genes)" = 4))
-      plotgrp = append(plotgrp, list("Conditions & Genes (color by Conditions)" = 5))
+      plotgrp = append(
+        plotgrp,
+        list("Conditions & Genes (color by Genes)" = 4)
+      )
+      
+      plotgrp = append(
+        plotgrp,
+        list("Conditions & Genes (color by Conditions)" = 5)
+      )
     }
-    if (input$timeselect != "NA")
+    
+    if (is_selected_col(analysis_time_col))
     {
-      plotgrp = append(plotgrp, list("Times & Genes (color by Genes)" = 6))
-      plotgrp = append(plotgrp, list("Times & Genes (color by Times)" = 7))
+      plotgrp = append(
+        plotgrp,
+        list("Times & Genes (color by Genes)" = 6)
+      )
+      
+      plotgrp = append(
+        plotgrp,
+        list("Times & Genes (color by Times)" = 7)
+      )
     }
-    if (input$condselect != "NA" && input$timeselect != "NA")
+    
+    if (
+      is_selected_col(analysis_cond_col) &&
+      is_selected_col(analysis_time_col)
+    )
     {
-      plotgrp = append(plotgrp, list("Conditions & Times (color by Times)" = 8))
-      plotgrp = append(plotgrp, list("Conditions & Times (color by Conditions)" = 9))
+      plotgrp = append(
+        plotgrp,
+        list("Conditions & Times (color by Times)" = 8)
+      )
+      
+      plotgrp = append(
+        plotgrp,
+        list("Conditions & Times (color by Conditions)" = 9)
+      )
     }
-    updateSelectInput(inputId = 'plotgrp', choices = plotgrp)
+    
+    valid_plotgrp <- as.character(
+      unlist(
+        plotgrp,
+        use.names = FALSE
+      )
+    )
+    
+    selected_plotgrp <- as.character(
+      input$plotgrp
+    )
+    
+    if (
+      length(selected_plotgrp) != 1 ||
+      !(selected_plotgrp %in% valid_plotgrp)
+    )
+    {
+      selected_plotgrp <- "1"
+    }
+    
+    updateSelectInput(
+      inputId = "plotgrp",
+      choices = plotgrp,
+      selected = selected_plotgrp
+    )
+    
+    # The analysis dimensions are now validated.
+    # They are needed by update_ori(), but no result has
+    # been committed yet.
+    
+    state$analysis_cond_col <- analysis_cond_col
+    state$analysis_time_col <- analysis_time_col
     
     update_ori()
     
-    state$processed_data <- data
-    p = makeOnePlot(data, input$condselect, input$timeselect, input$ctrlselect, input$timectrlselect, 
-                    input$houseselect, input$geneselect,
-                    input$plotctrl, input$plotlog, input$ploterr, input$plotgrp, input$plotori)
     
+    # --------------------------------------------------
+    # Build the main analysis atomically
+    # --------------------------------------------------
     
-    state$main_plot <- p
-    
-    h = makeOneHeatmap(
-      data,
-      input$condselect,
-      input$timeselect,
-      input$ctrlselect,
-      input$timectrlselect,
-      input$heatctrl,
-      input$heatlog,
-      input$heatori
+    analysis_result <- tryCatch(
+      {
+        processed_data <- makeDeltaDelta(
+          analysis_data,
+          analysis_cond_col,
+          input$condincselect,
+          analysis_time_col,
+          input$timeincselect,
+          input$repselect,
+          input$techselect,
+          input$ctrlselect,
+          input$timectrlselect,
+          input$houseselect,
+          input$geneselect,
+          eff_matrix
+        )
+        
+        
+        main_plot <- makeOnePlot(
+          processed_data,
+          analysis_cond_col,
+          analysis_time_col,
+          input$ctrlselect,
+          input$timectrlselect,
+          input$houseselect,
+          input$geneselect,
+          input$plotctrl,
+          input$plotlog,
+          input$ploterr,
+          selected_plotgrp,
+          input$plotori
+        )
+        
+        
+        heatmap <- makeOneHeatmap(
+          processed_data,
+          analysis_cond_col,
+          analysis_time_col,
+          input$ctrlselect,
+          input$timectrlselect,
+          input$heatctrl,
+          input$heatlog,
+          input$heatori
+        )
+        
+        
+        list(
+          ok = TRUE,
+          data = processed_data,
+          plot = main_plot,
+          heatmap = heatmap
+        )
+      },
+      
+      error = function(e)
+      {
+        list(
+          ok = FALSE,
+          message = paste0(
+            "Analysis could not be completed: ",
+            conditionMessage(e)
+          )
+        )
+      }
     )
     
-    state$heatmap <- h
+    
+    if (!analysis_result$ok)
+    {
+      # PCA may already have been calculated earlier in
+      # this Process run. Do not retain it when the main
+      # analysis itself failed.
+      
+      state$pca_data <- NULL
+      state$pca_plot <- NULL
+      state$pca_scores <- NULL
+      
+      state$analysis_cond_col <- NULL
+      state$analysis_time_col <- NULL
+      
+      
+      showNotification(
+        analysis_result$message,
+        type = "error",
+        duration = NULL
+      )
+      
+      
+      return(
+        invisible(FALSE)
+      )
+    }
+    
+    
+    # --------------------------------------------------
+    # Commit results only after everything succeeded
+    # --------------------------------------------------
+    
+    state$processed_data <-
+      analysis_result$data
+    
+    state$main_plot <-
+      analysis_result$plot
+    
+    state$heatmap <-
+      analysis_result$heatmap
     
     
     
@@ -3045,11 +4494,13 @@ server <- function(input, output, session) {
     handlerExpr = {
       
       req(state$processed_data)
+      req(state$analysis_cond_col)
+      req(state$analysis_time_col)
       
       p <- makeOnePlot(
         state$processed_data,
-        input$condselect,
-        input$timeselect,
+        state$analysis_cond_col,
+        state$analysis_time_col,
         input$ctrlselect,
         input$timectrlselect,
         input$houseselect,
@@ -3065,6 +4516,7 @@ server <- function(input, output, session) {
     }
   )
   
+  
   observeEvent(
     ignoreInit = TRUE,
     c(
@@ -3075,11 +4527,13 @@ server <- function(input, output, session) {
     handlerExpr = {
       
       req(state$processed_data)
+      req(state$analysis_cond_col)
+      req(state$analysis_time_col)
       
       h <- makeOneHeatmap(
         state$processed_data,
-        input$condselect,
-        input$timeselect,
+        state$analysis_cond_col,
+        state$analysis_time_col,
         input$ctrlselect,
         input$timectrlselect,
         input$heatctrl,
@@ -3091,23 +4545,74 @@ server <- function(input, output, session) {
     }
   )
   
-  update_ori = function()
+  update_ori <- function()
   {
-    if (input$condselect != 'NA' && input$timeselect != 'NA' && input$plotgrp %in% c(1, 2, 3))
+    cond_active <- is_selected_col(
+      state$analysis_cond_col
+    )
+    
+    time_active <- is_selected_col(
+      state$analysis_time_col
+    )
+    
+    
+    if (
+      cond_active &&
+      time_active &&
+      input$plotgrp %in% c(1, 2, 3)
+    )
     {
-      choices = switch(input$plotgrp, 
-                       '1'=c('Conditions x Times'=1, 'Times x Conditions'=2),
-                       '2'=c('Target x Times'=3, 'Times x Target'=4),
-                       '3'=c('Conditions x Target'=5, 'Target x Conditions'=6)
+      choices <- switch(
+        input$plotgrp,
+        
+        '1' = c(
+          'Conditions x Times' = 1,
+          'Times x Conditions' = 2
+        ),
+        
+        '2' = c(
+          'Target x Times' = 3,
+          'Times x Target' = 4
+        ),
+        
+        '3' = c(
+          'Conditions x Target' = 5,
+          'Target x Conditions' = 6
+        )
       )
-      updateRadioButtons(inputId = 'plotori', 
-                         choices = choices)
+      
+      ori_values <- as.character(
+        unname(choices)
+      )
+      
+      selected_ori <- as.character(
+        input$plotori
+      )
+      
+      if (
+        length(selected_ori) != 1 ||
+        !(selected_ori %in% ori_values)
+      )
+      {
+        selected_ori <- ori_values[1]
+      }
+      
+      updateRadioButtons(
+        inputId = "plotori",
+        choices = choices,
+        selected = selected_ori
+      )
+      
       showElement(id = 'plotori')
     }
     else
     {
-      updateRadioButtons(inputId = 'plotori', 
-                         choices = list('NULL'=0))
+      updateRadioButtons(
+        inputId = "plotori",
+        choices = list("NULL" = 0),
+        selected = 0
+      )
+      
       hideElement(id = 'plotori')
     }
   }
@@ -3372,6 +4877,49 @@ server <- function(input, output, session) {
         input$heatfrmt,
         input$heatwidth,
         input$heatheight
+      )
+    }
+  )
+  
+  output$download_pca <- downloadHandler(
+    
+    filename = function()
+    {
+      paste0(
+        "pca_log2_relative_expression.",
+        input$pcafrmt
+      )
+    },
+    
+    content = function(file)
+    {
+      req(state$pca_plot)
+      
+      download_figure(
+        file,
+        state$pca_plot,
+        input$pcafrmt,
+        input$pcawidth,
+        input$pcaheight
+      )
+    }
+  )
+  
+  output$download_pca_scores <- downloadHandler(
+    
+    filename = function()
+    {
+      "pca_scores.csv"
+    },
+    
+    content = function(file)
+    {
+      req(state$pca_scores)
+      
+      write.csv(
+        state$pca_scores,
+        file,
+        row.names = FALSE
       )
     }
   )
