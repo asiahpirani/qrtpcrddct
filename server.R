@@ -16,9 +16,7 @@ makeDeltaDelta = function(data, cond_col, uconditions, times_col, utimes, rep_co
                           ctrl, timecntrl, housekeeping, target,
                           eff_matrix)
 {
-  # DEBUG
-  print(uconditions)
-  print(utimes)
+
   all_genes = c(housekeeping, target)
   for (g in all_genes)
   {
@@ -232,7 +230,7 @@ makeDeltaDelta = function(data, cond_col, uconditions, times_col, utimes, rep_co
     res_names = c()
     for (cnd in uconditions)
     {
-      for (tg in target)
+      for (tg in targets)
       {
         vec  = res[conditions == cnd, tg]
         lvec = log2(vec)
@@ -263,7 +261,7 @@ makeDeltaDelta = function(data, cond_col, uconditions, times_col, utimes, rep_co
     {
       for (tm in utimes)
       {
-        for (tg in target)
+        for (tg in targets)
         {
           vec  = res[conditions == cnd & times == tm, tg]
           lvec = log2(vec)
@@ -825,20 +823,22 @@ make_pca_plot <- function(pca_data)
   
   # --------------------------------------------------
   # PCA scores + metadata
+  #
+  # Keep scores for all principal components.
+  # PC1 and PC2 will still be used for plotting.
   # --------------------------------------------------
   
-  scores <- data.frame(
-    Sample = rownames(x),
-    
-    PC1 = fit$x[, 1],
-    PC2 = fit$x[, 2],
-    
+  score_values <- as.data.frame(
+    fit$x,
     stringsAsFactors = FALSE
   )
   
   
+  sample_order <- rownames(x)
+  
+  
   metadata_order <- match(
-    scores$Sample,
+    sample_order,
     metadata$Sample
   )
   
@@ -850,9 +850,11 @@ make_pca_plot <- function(pca_data)
       drop = FALSE
     ],
     
-    PC1 = scores$PC1,
-    PC2 = scores$PC2
+    score_values
   )
+  
+  
+  rownames(scores) <- NULL
   
   
   # --------------------------------------------------
@@ -1203,6 +1205,49 @@ makeOneHeatmap <- function(
   # Format heatmap legend values
   # --------------------------------------------------
   
+  # --------------------------------------------------
+  # Heatmap neutral value
+  #
+  # Fold change:
+  #   1 = no change
+  #
+  # log2 fold change:
+  #   0 = no change
+  # --------------------------------------------------
+  
+  if (heatlog == 2)
+  {
+    neutral_value <- 0
+  }
+  else
+  {
+    neutral_value <- 1
+  }
+  
+  
+  # Numerical calculations can produce values such as
+  # 0.999999999999999 instead of exactly 1.
+  # Treat values extremely close to the biological
+  # neutral point as exactly neutral.
+  
+  neutral_tolerance <-
+    sqrt(.Machine$double.eps) *
+    max(
+      1,
+      abs(neutral_value)
+    )
+  
+  
+  near_neutral <-
+    is.finite(matrix_data) &
+    abs(matrix_data - neutral_value) <=
+    neutral_tolerance
+  
+  
+  matrix_data[near_neutral] <-
+    neutral_value
+  
+  
   finite_values <- as.numeric(matrix_data)
   
   finite_values <- finite_values[
@@ -1223,6 +1268,83 @@ makeOneHeatmap <- function(
   )
   
   
+  min_value <- value_range[1]
+  max_value <- value_range[2]
+  
+  
+  if (
+    min_value < neutral_value &&
+    max_value > neutral_value
+  )
+  {
+    # Data occur on both sides of the neutral value.
+    
+    heatmap_colors <- circlize::colorRamp2(
+      c(
+        min_value,
+        neutral_value,
+        max_value
+      ),
+      c(
+        "blue",
+        "white",
+        "red"
+      )
+    )
+  }
+  else if (min_value >= neutral_value)
+  {
+    # All observed values are neutral or above neutral.
+    
+    if (max_value > neutral_value)
+    {
+      heatmap_colors <- circlize::colorRamp2(
+        c(
+          neutral_value,
+          max_value
+        ),
+        c(
+          "white",
+          "red"
+        )
+      )
+    }
+    else
+    {
+      # All values equal the neutral value.
+      
+      delta <- if (heatlog == 2) 1 else 0.5
+      
+      heatmap_colors <- circlize::colorRamp2(
+        c(
+          neutral_value - delta,
+          neutral_value,
+          neutral_value + delta
+        ),
+        c(
+          "blue",
+          "white",
+          "red"
+        )
+      )
+    }
+  }
+  else
+  {
+    # All observed values are below neutral.
+    
+    heatmap_colors <- circlize::colorRamp2(
+      c(
+        min_value,
+        neutral_value
+      ),
+      c(
+        "blue",
+        "white"
+      )
+    )
+  }
+  
   range_tolerance <-
     sqrt(.Machine$double.eps) *
     max(
@@ -1236,31 +1358,48 @@ makeOneHeatmap <- function(
     range_tolerance
   )
   {
-    # Effectively a single value, e.g.
-    # 0.999999999999999 should display as 1.
-    
-    legend_at <- mean(
-      value_range
-    )
+    legend_at <- neutral_value
   }
   else
   {
+    legend_min <- min(
+      min_value,
+      neutral_value
+    )
+    
+    legend_max <- max(
+      max_value,
+      neutral_value
+    )
+    
+    
     legend_at <- pretty(
-      value_range,
+      c(
+        legend_min,
+        legend_max
+      ),
       n = 5
     )
     
     
     legend_at <- legend_at[
-      legend_at >= value_range[1] &
-        legend_at <= value_range[2]
+      legend_at >= legend_min &
+        legend_at <= legend_max
     ]
     
     
-    if (length(legend_at) < 2)
-    {
-      legend_at <- value_range
-    }
+    # Always show the biologically meaningful
+    # neutral point, but do not force arbitrary
+    # observed extrema into the legend.
+    
+    legend_at <- sort(
+      unique(
+        c(
+          legend_at,
+          neutral_value
+        )
+      )
+    )
   }
   
   
@@ -1316,6 +1455,7 @@ makeOneHeatmap <- function(
     h <- Heatmap(
       matrix_data,
       name = heatmap_legend_title,
+      col = heatmap_colors,
       top_annotation = col_annot,
       heatmap_legend_param = heatmap_legend_param
     )
@@ -1332,6 +1472,7 @@ makeOneHeatmap <- function(
     h <- Heatmap(
       matrix_data,
       name = heatmap_legend_title,
+      col = heatmap_colors,
       right_annotation = row_annot,
       heatmap_legend_param = heatmap_legend_param
     )
@@ -3562,8 +3703,7 @@ server <- function(input, output, session) {
     {
       file <- input$infile
       check = !is.null(file)
-      # DEBUG
-      print(check)
+
       feedbackWarning(inputId = 'infile', show=!check, text = "Please select an input file.")
       # validate(need(check, "Please select an input file."))
       req(check)
@@ -3580,6 +3720,33 @@ server <- function(input, output, session) {
       loadeddata <- read.table(text = input$textarea, sep='\t', header = T)
     }
     
+    # --------------------------------------------------
+    # A new dataset has been loaded.
+    # Invalidate all results from the previous dataset.
+    # --------------------------------------------------
+    
+    state$processed_data <- NULL
+    state$main_plot <- NULL
+    state$heatmap <- NULL
+    
+    state$pca_data <- NULL
+    state$pca_plot <- NULL
+    state$pca_scores <- NULL
+    
+    state$analysis_cond_col <- NULL
+    state$analysis_time_col <- NULL
+    
+    
+    hideTab(
+      inputId = "mainpagetab",
+      target = plot_tab_title
+    )
+    
+    hideTab(
+      inputId = "mainpagetab",
+      target = heatmap_tab_title
+    )
+    
     updateSelectInput(inputId = 'repselect',   choices = colnames(loadeddata))
     updateSelectInput(inputId = 'techselect',  choices = c('NA',colnames(loadeddata)))
     updateSelectInput(inputId = 'condselect',  choices = c('NA',colnames(loadeddata)))
@@ -3590,10 +3757,6 @@ server <- function(input, output, session) {
     updateSelectInput(inputId = 'ctrlselect',     choices = c(""), selected="")
     updateSelectInput(inputId = 'timectrlselect', choices = c(""), selected="")
     
-    # DEBUG
-    print('check update')
-    print(input$ctrlselect)
-    print(input$timectrlselect)
     
     enable("processb")
     enable("repselect")
